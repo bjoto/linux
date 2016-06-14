@@ -61,6 +61,7 @@
 #include "util/counts.h"
 #include "util/session.h"
 #include "util/tool.h"
+#include "util/trigger.h"
 #include "asm/bug.h"
 
 #include <stdlib.h>
@@ -130,6 +131,7 @@ static aggr_get_id_t		aggr_get_id;
 static bool			append_file;
 static const char		*output_name;
 static int			output_fd;
+static bool			polled_interval			= false;
 
 struct perf_stat {
 	bool			 record;
@@ -147,6 +149,8 @@ static struct perf_stat		perf_stat;
 #define STAT_RECORD		perf_stat.record
 
 static volatile int done = 0;
+
+static DEFINE_TRIGGER(polled_interval_trigger);
 
 static struct perf_stat_config stat_config = {
 	.aggr_mode	= AGGR_GLOBAL,
@@ -614,10 +618,25 @@ try_again:
 		perf_evlist__start_workload(evsel_list);
 		enable_counters();
 
-		if (interval) {
+		if (interval || polled_interval) {
+			struct timespec rem, *req = &ts;
+
 			while (!waitpid(child_pid, &status, WNOHANG)) {
-				nanosleep(&ts, NULL);
-				process_interval();
+				int err = nanosleep(req, &rem);
+
+				if (trigger_is_hit(&polled_interval_trigger)) {
+					trigger_ready(&polled_interval_trigger);
+
+					if (err && errno == EINTR)
+						req = &rem;
+
+					process_interval();
+					continue;
+				}
+
+				req = &ts;
+				if (interval)
+					process_interval();
 			}
 		}
 		wait(&status);
@@ -631,11 +650,26 @@ try_again:
 		if (WIFSIGNALED(status))
 			psignal(WTERMSIG(status), argv[0]);
 	} else {
+		struct timespec rem, *req = &ts;
+
 		enable_counters();
 		while (!done) {
-			nanosleep(&ts, NULL);
-			if (interval)
-				process_interval();
+			int err = nanosleep(req, &rem);
+			if (interval || polled_interval) {
+				if (trigger_is_hit(&polled_interval_trigger)) {
+					trigger_ready(&polled_interval_trigger);
+
+					if (err && errno == EINTR)
+						req = &rem;
+
+					process_interval();
+					continue;
+				}
+
+				req = &ts;
+				if (interval)
+					process_interval();
+			}
 		}
 	}
 
@@ -1412,7 +1446,7 @@ static void print_footer(void)
 
 static void print_counters(struct timespec *ts, int argc, const char **argv)
 {
-	int interval = stat_config.interval;
+	int interval = stat_config.interval || polled_interval;
 	struct perf_evsel *counter;
 	char buf[64], *prefix = NULL;
 
@@ -1472,10 +1506,19 @@ static void print_counters(struct timespec *ts, int argc, const char **argv)
 
 static volatile int signr = -1;
 
+
+static void polled_interval_signal(int sig __maybe_unused)
+{
+	if (trigger_is_ready(&polled_interval_trigger))
+		trigger_hit(&polled_interval_trigger);
+}
+
 static void skip_signal(int signo)
 {
-	if ((child_pid == -1) || stat_config.interval)
+	if ((child_pid == -1) || stat_config.interval || polled_interval)
 		done = 1;
+
+	polled_interval_signal(signo);
 
 	signr = signo;
 	/*
@@ -1580,6 +1623,8 @@ static const struct option stat_options[] = {
 		     "ms to wait before starting measurement after program start"),
 	OPT_BOOLEAN(0, "metric-only", &metric_only,
 			"Only print computed metrics. No raw values"),
+	OPT_BOOLEAN('P', "polled-interval-print", &polled_interval,
+		    "print counts when receive SIGUSR2"),
 	OPT_END()
 };
 
@@ -2368,6 +2413,12 @@ int cmd_stat(int argc, const char **argv, const char *prefix __maybe_unused)
 	signal(SIGALRM, skip_signal);
 	signal(SIGABRT, skip_signal);
 
+	if (polled_interval) {
+		signal(SIGUSR2, polled_interval_signal);
+		trigger_on(&polled_interval_trigger);
+		trigger_ready(&polled_interval_trigger);
+	}
+
 	status = 0;
 	for (run_idx = 0; forever || run_idx < run_count; run_idx++) {
 		if (run_count != 1 && verbose)
@@ -2381,7 +2432,7 @@ int cmd_stat(int argc, const char **argv, const char *prefix __maybe_unused)
 		}
 	}
 
-	if (!forever && status != -1 && !interval)
+	if (!forever && status != -1 && !interval && !polled_interval)
 		print_counters(NULL, argc, argv);
 
 	if (STAT_RECORD) {
