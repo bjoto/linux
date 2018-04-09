@@ -8,6 +8,8 @@
 #include <linux/err.h>
 #include <linux/errno.h>
 #include <linux/moduleloader.h>
+#include <linux/vmalloc.h>
+#include <asm/pgtable.h>
 
 static int apply_r_riscv_32_rela(struct module *me, u32 *location, Elf_Addr v)
 {
@@ -385,4 +387,13 @@ int apply_relocate_add(Elf_Shdr *sechdrs, const char *strtab,
 	}
 
 	return 0;
+}
+
+void *module_alloc(unsigned long size)
+{
+	return __vmalloc_node_range(size, 1, MODULES_VADDR,
+				    MODULES_END, GFP_KERNEL,
+				    PAGE_KERNEL_EXEC, 0,
+				    NUMA_NO_NODE,
+				    __builtin_return_address(0));
 }
