@@ -5989,6 +5989,7 @@ static struct napi_struct *napi_by_id(unsigned int napi_id)
 
 static void busy_poll_stop(struct napi_struct *napi, void *have_poll_lock)
 {
+	int busy_poll_budget = BUSY_POLL_BUDGET;
 	int rc;
 
 	/* Busy polling means there is a high chance device driver hard irq
@@ -6008,10 +6009,12 @@ static void busy_poll_stop(struct napi_struct *napi, void *have_poll_lock)
 	/* All we really want here is to re-enable device interrupts.
 	 * Ideally, a new ndo_busy_poll_stop() could avoid another round.
 	 */
-	rc = napi->poll(napi, BUSY_POLL_BUDGET);
-	trace_napi_poll(napi, rc, BUSY_POLL_BUDGET);
+	if (sysctl_net_busy_poll_budget)
+		busy_poll_budget = sysctl_net_busy_poll_budget;
+	rc = napi->poll(napi, busy_poll_budget);
+	trace_napi_poll(napi, rc, busy_poll_budget);
 	netpoll_poll_unlock(have_poll_lock);
-	if (rc == BUSY_POLL_BUDGET)
+	if (rc == busy_poll_budget)
 		__napi_schedule(napi);
 	local_bh_enable();
 }
@@ -6036,6 +6039,7 @@ restart:
 
 	preempt_disable();
 	for (;;) {
+		int busy_poll_budget = BUSY_POLL_BUDGET;
 		int work = 0;
 
 		local_bh_disable();
@@ -6055,8 +6059,10 @@ restart:
 			have_poll_lock = netpoll_poll_lock(napi);
 			napi_poll = napi->poll;
 		}
-		work = napi_poll(napi, BUSY_POLL_BUDGET);
-		trace_napi_poll(napi, work, BUSY_POLL_BUDGET);
+		if (sysctl_net_busy_poll_budget)
+			busy_poll_budget = sysctl_net_busy_poll_budget;
+		work = napi_poll(napi, busy_poll_budget);
+		trace_napi_poll(napi, work, busy_poll_budget);
 count:
 		if (work > 0)
 			__NET_ADD_STATS(dev_net(napi->dev),

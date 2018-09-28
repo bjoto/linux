@@ -111,6 +111,8 @@
 #ifdef CONFIG_NET_RX_BUSY_POLL
 unsigned int sysctl_net_busy_read __read_mostly;
 unsigned int sysctl_net_busy_poll __read_mostly;
+unsigned int sysctl_net_busy_poll_budget __read_mostly;
+EXPORT_SYMBOL_GPL(sysctl_net_busy_poll_budget);
 #endif
 
 static ssize_t sock_read_iter(struct kiocb *iocb, struct iov_iter *to);

@@ -40,6 +40,7 @@
 struct napi_struct;
 extern unsigned int sysctl_net_busy_read __read_mostly;
 extern unsigned int sysctl_net_busy_poll __read_mostly;
+extern unsigned int sysctl_net_busy_poll_budget __read_mostly;
 
 static inline bool net_busy_loop_on(void)
 {
