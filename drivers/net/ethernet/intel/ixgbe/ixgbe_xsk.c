@@ -14,6 +14,7 @@ struct xdp_umem *ixgbe_xsk_umem(struct ixgbe_adapter *adapter,
 	bool xdp_on = READ_ONCE(adapter->xdp_prog);
 	int qid = ring->queue_index;
 
+	WARN_ON(qid >= adapter->num_xsk_umems);
 	if (!adapter->xsk_umems || !adapter->xsk_umems[qid] || !xdp_on)
 		return NULL;
 
