@@ -3476,6 +3476,8 @@ void ixgbe_configure_tx_ring(struct ixgbe_adapter *adapter,
 
 	if (ring_is_xdp(ring))
 		ring->xsk_umem = ixgbe_xsk_umem(adapter, ring);
+	else
+		ring->xsk_umem = NULL;
 
 	/* disable queue to avoid issues while updating state */
 	IXGBE_WRITE_REG(hw, IXGBE_TXDCTL(reg_idx), 0);
