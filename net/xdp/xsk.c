@@ -100,17 +100,20 @@ static int __xsk_rcv_zc(struct xdp_sock *xs, struct xdp_buff *xdp, u32 len)
 	return err;
 }
 
-int xsk_rcv(struct xdp_sock *xs, struct xdp_buff *xdp)
+int xsk_attached_rcv(struct xdp_sock *xs, struct xdp_buff *xdp)
 {
-	u32 len;
-
-	if (xs->dev != xdp->rxq->dev || xs->queue_id != xdp->rxq->queue_index)
-		return -EINVAL;
-
-	len = xdp->data_end - xdp->data;
+	u32 len = xdp->data_end - xdp->data;
 
 	return (xdp->rxq->mem.type == MEM_TYPE_ZERO_COPY) ?
 		__xsk_rcv_zc(xs, xdp, len) : __xsk_rcv(xs, xdp, len);
+}
+
+int xsk_rcv(struct xdp_sock *xs, struct xdp_buff *xdp)
+{
+	if (xs->dev != xdp->rxq->dev || xs->queue_id != xdp->rxq->queue_index)
+		return -EINVAL;
+
+	return xsk_attached_rcv(xs, xdp);
 }
 
 void xsk_flush(struct xdp_sock *xs)
@@ -339,6 +342,36 @@ static int xsk_init_queue(u32 entries, struct xsk_queue **queue,
 	return 0;
 }
 
+static struct xdp_sock *xsk_get_attached(struct net_device *dev, u16 qid)
+{
+	return dev->_rx[qid].xsk;
+}
+
+static void xsk_detach(struct xdp_sock *xs)
+{
+	// XXX Write once?
+	xs->dev->_rx[xs->queue_id].xsk = NULL;
+}
+
+static int xsk_attach(struct xdp_sock *xs, struct net_device *dev, u16 qid)
+{
+	int err = 0;
+
+	// No need to check if qid is OK here.
+	rtnl_lock();
+	if (xsk_get_attached(dev, qid)) {
+		err = -EBUSY;
+		goto out;
+	}
+
+	dev->_rx[qid].xsk = xs;
+
+	// XXX add built in program.
+out:
+	rtnl_unlock();
+	return err;
+}
+
 static int xsk_release(struct socket *sock)
 {
 	struct sock *sk = sock->sk;
@@ -359,6 +392,7 @@ static int xsk_release(struct socket *sock)
 
 		/* Wait for driver to stop using the xdp socket. */
 		xdp_del_sk_umem(xs->umem, xs);
+		xsk_detach(xs);
 		xs->dev = NULL;
 		synchronize_net();
 		dev_put(dev);
@@ -431,7 +465,8 @@ static int xsk_bind(struct socket *sock, struct sockaddr *addr, int addr_len)
 		struct xdp_sock *umem_xs;
 		struct socket *sock;
 
-		if ((flags & XDP_COPY) || (flags & XDP_ZEROCOPY)) {
+		if ((flags & XDP_COPY) || (flags & XDP_ZEROCOPY) ||
+		    (flags & XDP_ATTACH)) {
 			/* Cannot specify flags for shared sockets. */
 			err = -EINVAL;
 			goto out_unlock;
@@ -477,6 +512,12 @@ static int xsk_bind(struct socket *sock, struct sockaddr *addr, int addr_len)
 		err = xdp_umem_assign_dev(xs->umem, dev, qid, flags);
 		if (err)
 			goto out_unlock;
+
+		if (flags & XDP_ATTACH) {
+			err = xsk_attach(xs, dev, qid);
+			if (err)
+				goto out_unlock;
+		}
 	}
 
 	xs->dev = dev;

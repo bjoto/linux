@@ -743,6 +743,7 @@ struct netdev_rx_queue {
 	struct xdp_rxq_info		xdp_rxq;
 #ifdef CONFIG_XDP_SOCKETS
 	struct xdp_umem                 *umem;
+	struct xdp_sock			*xsk;
 #endif
 } ____cacheline_aligned_in_smp;
 
