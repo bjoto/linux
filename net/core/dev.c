@@ -7825,6 +7825,62 @@ static void dev_xdp_uninstall(struct net_device *dev)
 					NULL));
 }
 
+#if CONFIG_XDP_SOCKETS
+int dev_xsk_prog_install(struct net_device *dev, struct bpf_prog *prog,
+			 u32 flags)
+{
+	ASSERT_RTNL();
+
+	if (dev->xsk_prog && prog != dev->xsk_prog)
+		return -EINVAL;
+	if (flags && flags != dev->xsk_prog_flags)
+		return -EINVAL;
+
+	if (dev->xsk_prog)
+		return 0;
+
+	dev->xsk_prog = bpf_prog_inc(prog);
+	dev->xsk_prog_flags = flags | XDP_FLAGS_UPDATE_IF_NOEXIST;
+	(void)dev_change_xdp_fd(dev, NULL, -1, dev->xsk_prog_flags);
+	return 0;
+}
+
+void dev_xsk_prog_uninstall(struct net_device *dev)
+{
+	ASSERT_RTNL();
+
+	bpf_prog_put(dev->xsk_prog);
+	dev->xsk_prog = NULL;
+	if (dev->xsk_prog_running)
+		(void)dev_change_xdp_fd(dev, NULL, -1, dev->xsk_prog_flags);
+	dev->xsk_prog_flags = 0;
+	dev->xsk_prog_running = false;
+}
+#endif
+
+static void dev_xsk_prog_pre_load(struct net_device *dev, int fd,
+				  struct bpf_prog **prog, u32 *flags)
+{
+#if CONFIG_XDP_SOCKETS
+	if (fd >= 0)
+		return;
+
+	if (dev->xsk_prog) {
+		*prog = bpf_prog_inc(dev->xsk_prog);
+		*flags = dev->xsk_prog_flags;
+		dev->xsk_prog_flags &= ~XDP_FLAGS_UPDATE_IF_NOEXIST;
+	}
+#endif
+}
+
+static void dev_xsk_prog_post_load(struct net_device *dev, int err,
+				   struct bpf_prog *prog)
+{
+#if CONFIG_XDP_SOCKETS
+	dev->xsk_prog_running = prog && prog == dev->xsk_prog && err >= 0;
+#endif
+}
+
 /**
  *	dev_change_xdp_fd - set or clear a bpf program for a device rx path
  *	@dev: device
@@ -7855,16 +7911,25 @@ int dev_change_xdp_fd(struct net_device *dev, struct netlink_ext_ack *extack,
 	if (bpf_op == bpf_chk)
 		bpf_chk = generic_xdp_install;
 
-	if (fd >= 0) {
-		if (__dev_xdp_query(dev, bpf_chk, XDP_QUERY_PROG) ||
-		    __dev_xdp_query(dev, bpf_chk, XDP_QUERY_PROG_HW))
-			return -EEXIST;
-		if ((flags & XDP_FLAGS_UPDATE_IF_NOEXIST) &&
-		    __dev_xdp_query(dev, bpf_op, query))
-			return -EBUSY;
+	dev_xsk_prog_pre_load(dev, fd, &prog, &flags);
 
-		prog = bpf_prog_get_type_dev(fd, BPF_PROG_TYPE_XDP,
-					     bpf_op == ops->ndo_bpf);
+	if (fd >= 0 || prog) {
+		if (__dev_xdp_query(dev, bpf_chk, XDP_QUERY_PROG) ||
+		    __dev_xdp_query(dev, bpf_chk, XDP_QUERY_PROG_HW)) {
+			if (prog)
+				bpf_prog_put(prog);
+			return -EEXIST;
+		}
+		if ((flags & XDP_FLAGS_UPDATE_IF_NOEXIST) &&
+		    __dev_xdp_query(dev, bpf_op, query)) {
+			if (prog)
+				bpf_prog_put(prog);
+			return -EBUSY;
+		}
+
+		if (!prog)
+		       prog = bpf_prog_get_type_dev(fd, BPF_PROG_TYPE_XDP,
+						    bpf_op == ops->ndo_bpf);
 		if (IS_ERR(prog))
 			return PTR_ERR(prog);
 
@@ -7879,6 +7944,8 @@ int dev_change_xdp_fd(struct net_device *dev, struct netlink_ext_ack *extack,
 	err = dev_xdp_install(dev, bpf_op, extack, flags, prog);
 	if (err < 0 && prog)
 		bpf_prog_put(prog);
+
+	dev_xsk_prog_post_load(dev, err, prog);
 
 	return err;
 }

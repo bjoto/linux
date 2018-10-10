@@ -2049,6 +2049,12 @@ struct net_device {
 	struct lock_class_key	*qdisc_running_key;
 	bool			proto_down;
 	unsigned		wol_enabled:1;
+
+#ifdef CONFIG_XDP_SOCKETS
+	struct bpf_prog		*xsk_prog;
+	u32			xsk_prog_flags;
+	bool			xsk_prog_running;
+#endif
 };
 #define to_net_dev(d) container_of(d, struct net_device, dev)
 
@@ -4782,5 +4788,21 @@ do {								\
  */
 #define PTYPE_HASH_SIZE	(16)
 #define PTYPE_HASH_MASK	(PTYPE_HASH_SIZE - 1)
+
+#if CONFIG_XDP_SOCKETS
+int dev_xsk_prog_install(struct net_device *dev, struct bpf_prog *prog,
+			 u32 flags);
+void dev_xsk_prog_uninstall(struct net_device *dev);
+#else
+int dev_xsk_prog_install(struct net_device *dev, struct bpf_prog *prog,
+			 u32 flags)
+{
+	return 0;
+}
+bool dev_xsk_prog_uninstall(struct net_device *dev)
+{
+	return false;
+}
+#endif
 
 #endif	/* _LINUX_NETDEVICE_H */
