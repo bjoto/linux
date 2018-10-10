@@ -543,6 +543,8 @@ struct bpf_redirect_info {
 	u32 flags;
 	struct bpf_map *map;
 	struct bpf_map *map_to_flush;
+	struct xdp_sock *xsk;
+	struct xdp_sock *xsk_to_flush;
 	u32 kern_flags;
 };
 
