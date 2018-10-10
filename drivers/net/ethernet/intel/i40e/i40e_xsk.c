@@ -651,8 +651,10 @@ int i40e_clean_rx_irq_zc(struct i40e_ring *rx_ring, int budget)
 		 */
 		dma_rmb();
 
-		bi = i40e_clean_programming_status(rx_ring, rx_desc,
-						   qword);
+		bi = i40e_rx_is_programming_status(qword) ?
+		     i40e_clean_programming_status(rx_ring, rx_desc,
+						   qword):
+		     NULL;
 		if (unlikely(bi)) {
 			i40e_reuse_rx_buffer_zc(rx_ring, bi);
 			cleaned_count++;
