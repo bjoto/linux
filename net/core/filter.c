@@ -3493,14 +3493,16 @@ static const struct bpf_func_proto bpf_xdp_redirect_map_proto = {
 
 int __bpf_xdp_xsk_redirect(struct xdp_buff *xdp)
 {
-	struct xdp_sock *xsk = xdp->rxq->dev->_rx[xdp->rxq->queue_index].xsk;
 	struct bpf_redirect_info *ri = this_cpu_ptr(&bpf_redirect_info);
 
 	// XXX: keep flags as last arg, e.g to change default return
 	// from XDP_PASS to XDP_DROP?
 
-	ri->xsk = xsk;
-	return ri->xsk ? XDP_REDIRECT : XDP_PASS;
+	if (!xdp->rxq->xsk)
+		return XDP_PASS;
+
+	ri->xsk = xdp->rxq->xsk;
+	return XDP_REDIRECT;
 }
 
 BPF_CALL_2(bpf_xdp_xsk_redirect, struct xdp_buff *, xdp, u64, flags)
