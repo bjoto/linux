@@ -3504,6 +3504,7 @@ int __bpf_xdp_xsk_redirect(struct xdp_buff *xdp)
 	ri->xsk = xdp->rxq->xsk;
 	return XDP_REDIRECT;
 }
+EXPORT_SYMBOL(__bpf_xdp_xsk_redirect);
 
 BPF_CALL_2(bpf_xdp_xsk_redirect, struct xdp_buff *, xdp, u64, flags)
 {

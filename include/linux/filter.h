@@ -487,7 +487,8 @@ struct bpf_prog {
 				blinded:1,	/* Was blinded */
 				is_func:1,	/* program is a bpf function */
 				kprobe_override:1, /* Do we override a kprobe? */
-				has_callchain_buf:1; /* callchain buffer allocated? */
+				has_callchain_buf:1, /* callchain buffer allocated? */
+				xsk_builtin:1;
 	enum bpf_prog_type	type;		/* Type of BPF program */
 	enum bpf_attach_type	expected_attach_type; /* For some prog types */
 	u32			len;		/* Number of filter blocks */
@@ -618,9 +619,14 @@ static inline u32 bpf_prog_run_clear_cb(const struct bpf_prog *prog,
 	return BPF_PROG_RUN(prog, skb);
 }
 
+int __bpf_xdp_xsk_redirect(struct xdp_buff *xdp);
+
 static __always_inline u32 bpf_prog_run_xdp(const struct bpf_prog *prog,
 					    struct xdp_buff *xdp)
 {
+	if (prog->xsk_builtin)
+		return __bpf_xdp_xsk_redirect(xdp);
+
 	/* Caller needs to hold rcu_read_lock() (!), otherwise program
 	 * can be released while still running, or map elements could be
 	 * freed early while still having concurrent users. XDP fastpath

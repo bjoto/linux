@@ -371,6 +371,7 @@ static struct bpf_prog *xsk_load_builtin_prog(void)
 	prog->jited = 0;
 	atomic_set(&prog->aux->refcnt, 1);
 	prog->gpl_compatible = 1;
+	prog->xsk_builtin = 1;
 
 	err = find_prog_type(BPF_PROG_TYPE_XDP, prog);
 	if (err < 0)
