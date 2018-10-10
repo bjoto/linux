@@ -435,7 +435,7 @@ int bpf_get_file_flag(int flags)
 /* dst and src must have at least BPF_OBJ_NAME_LEN number of bytes.
  * Return 0 on success and < 0 on error.
  */
-static int bpf_obj_name_cpy(char *dst, const char *src)
+int bpf_obj_name_cpy(char *dst, const char *src)
 {
 	const char *end = src + BPF_OBJ_NAME_LEN;
 
@@ -978,7 +978,7 @@ static const struct bpf_prog_ops * const bpf_prog_types[] = {
 #undef BPF_MAP_TYPE
 };
 
-static int find_prog_type(enum bpf_prog_type type, struct bpf_prog *prog)
+int find_prog_type(enum bpf_prog_type type, struct bpf_prog *prog)
 {
 	const struct bpf_prog_ops *ops;
 
@@ -1061,7 +1061,7 @@ static void bpf_prog_uncharge_memlock(struct bpf_prog *prog)
 	free_uid(user);
 }
 
-static int bpf_prog_alloc_id(struct bpf_prog *prog)
+int bpf_prog_alloc_id(struct bpf_prog *prog)
 {
 	int id;
 
@@ -1961,8 +1961,11 @@ static int bpf_prog_get_info_by_fd(struct bpf_prog *prog,
 	info.type = prog->type;
 	info.id = prog->aux->id;
 	info.load_time = prog->aux->load_time;
-	info.created_by_uid = from_kuid_munged(current_user_ns(),
-					       prog->aux->user->uid);
+	// XXX
+	info.created_by_uid = prog->aux->user ? from_kuid_munged(
+		current_user_ns(),
+		prog->aux->user->uid) :
+			      0;
 	info.gpl_compatible = prog->gpl_compatible;
 
 	memcpy(info.tag, prog->tag, sizeof(prog->tag));

@@ -342,6 +342,79 @@ static int xsk_init_queue(u32 entries, struct xsk_queue **queue,
 	return 0;
 }
 
+static const struct bpf_insn xsk_prog_insn[] = {
+	BPF_RAW_INSN(BPF_JMP | BPF_CALL, 0, 0, 0, BPF_FUNC_xsk_redirect),
+	BPF_EXIT_INSN(),
+};
+static const unsigned int xsk_prog_insn_cnt = ARRAY_SIZE(xsk_prog_insn);
+static struct bpf_prog *xsk_builtin_prog;
+static unsigned int xsk_builtin_prog_refcnt;
+
+static struct bpf_prog *xsk_load_builtin_prog(void)
+{
+	union bpf_attr attr = {};
+	struct bpf_prog *prog;
+	int err = 0;
+
+	if (xsk_builtin_prog) {
+		xsk_builtin_prog_refcnt++;
+		return xsk_builtin_prog;
+	}
+
+	prog = bpf_prog_alloc(bpf_prog_size(xsk_prog_insn_cnt), 0);
+        if (!prog)
+                return ERR_PTR(-ENOMEM);
+
+        memcpy(prog->insns, &xsk_prog_insn[0], sizeof(xsk_prog_insn));
+        prog->len = xsk_prog_insn_cnt;
+	prog->orig_prog = NULL;
+	prog->jited = 0;
+	atomic_set(&prog->aux->refcnt, 1);
+	prog->gpl_compatible = 1;
+
+	err = find_prog_type(BPF_PROG_TYPE_XDP, prog);
+	if (err < 0)
+		goto out_err_free;
+
+	prog->aux->load_time = ktime_get_boot_ns();
+	err = bpf_obj_name_cpy(prog->aux->name, "AF_XDP_BUILTIN");
+	if (err)
+		goto out_err_free;
+
+	err = bpf_check(&prog, &attr);
+	if (err < 0)
+		goto out_err_free;
+
+        prog = bpf_prog_select_runtime(prog, &err);
+        if (err)
+                goto out_err_free;
+
+	err = bpf_prog_alloc_id(prog);
+	if (err)
+		goto out_err_free;
+
+	bpf_prog_kallsyms_add(prog);
+	xsk_builtin_prog_refcnt++;
+	xsk_builtin_prog = prog;
+        return prog;
+
+out_err_free:
+        bpf_prog_free(prog);
+        return ERR_PTR(err);
+}
+
+static bool xsk_unload_builtin_prog(void)
+{
+	xsk_builtin_prog_refcnt--;
+
+	if (xsk_builtin_prog_refcnt)
+		return false;
+
+	bpf_prog_put(xsk_builtin_prog);
+	xsk_builtin_prog = NULL;
+	return true;
+}
+
 static struct xdp_sock *xsk_get_attached(struct net_device *dev, u16 qid)
 {
 	return dev->_rx[qid].xsk;
@@ -349,12 +422,19 @@ static struct xdp_sock *xsk_get_attached(struct net_device *dev, u16 qid)
 
 static void xsk_detach(struct xdp_sock *xs)
 {
-	// XXX Write once?
-	xs->dev->_rx[xs->queue_id].xsk = NULL;
+	if (xsk_get_attached(xs->dev, xs->queue_id)) {
+		rtnl_lock();
+		xs->dev->_rx[xs->queue_id].xsk = NULL;
+		// XXX This is broken for multiple sockets on same dev/qid
+		xsk_unload_builtin_prog();
+		dev_xsk_prog_uninstall(xs->dev);
+		rtnl_unlock();
+	}
 }
 
 static int xsk_attach(struct xdp_sock *xs, struct net_device *dev, u16 qid)
 {
+	struct bpf_prog *prog;
 	int err = 0;
 
 	// No need to check if qid is OK here.
@@ -366,8 +446,23 @@ static int xsk_attach(struct xdp_sock *xs, struct net_device *dev, u16 qid)
 
 	dev->_rx[qid].xsk = xs;
 
-	// XXX add built in program.
+	prog = xsk_load_builtin_prog();
+	if (IS_ERR(prog)) {
+		err = PTR_ERR(prog);
+		goto out;
+	}
+
+	err = dev_xsk_prog_install(dev, prog, 0);
+	if (err)
+		goto out_unload;
+
+	goto out_unlock;
+
+out_unload:
+	(void)xsk_unload_builtin_prog();
 out:
+	dev->_rx[qid].xsk = NULL;
+out_unlock:
 	rtnl_unlock();
 	return err;
 }
