@@ -713,6 +713,8 @@ struct i40e_vsi {
 	struct i40e_ring **rx_rings;
 	struct i40e_ring **tx_rings;
 	struct i40e_ring **xdp_rings; /* XDP Tx rings */
+	struct i40e_ring **xdp_rings_2; /* XDP Tx rings */
+	struct i40e_ring **xdp_rings_3; /* XDP Tx rings */
 
 	u32  active_filters;
 	u32  promisc_threshold;
@@ -1098,10 +1100,7 @@ static inline bool i40e_enabled_xdp_vsi(struct i40e_vsi *vsi)
 static inline struct xdp_umem *i40e_xsk_umem(struct i40e_ring *ring)
 {
 	bool xdp_on = i40e_enabled_xdp_vsi(ring->vsi);
-	int qid = ring->queue_index;
-
-	if (ring_is_xdp(ring))
-		qid -= ring->vsi->alloc_queue_pairs;
+	int qid = ring->idx;
 
 	if (!ring->vsi->xsk_umems || !ring->vsi->xsk_umems[qid] || !xdp_on)
 		return NULL;

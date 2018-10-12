@@ -2971,8 +2971,11 @@ static int i40e_vsi_setup_tx_resources(struct i40e_vsi *vsi)
 	if (!i40e_enabled_xdp_vsi(vsi))
 		return err;
 
-	for (i = 0; i < vsi->num_queue_pairs && !err; i++)
+	for (i = 0; i < vsi->num_queue_pairs && !err; i++) {
 		err = i40e_setup_tx_descriptors(vsi->xdp_rings[i]);
+		err |= i40e_setup_tx_descriptors(vsi->xdp_rings_2[i]);
+		err |= i40e_setup_tx_descriptors(vsi->xdp_rings_3[i]);
+	}
 
 	return err;
 }
@@ -2994,9 +2997,14 @@ static void i40e_vsi_free_tx_resources(struct i40e_vsi *vsi)
 	}
 
 	if (vsi->xdp_rings) {
-		for (i = 0; i < vsi->num_queue_pairs; i++)
+		for (i = 0; i < vsi->num_queue_pairs; i++) {
 			if (vsi->xdp_rings[i] && vsi->xdp_rings[i]->desc)
 				i40e_free_tx_resources(vsi->xdp_rings[i]);
+			if (vsi->xdp_rings_2[i] && vsi->xdp_rings_2[i]->desc)
+				i40e_free_tx_resources(vsi->xdp_rings_2[i]);
+			if (vsi->xdp_rings_3[i] && vsi->xdp_rings_3[i]->desc)
+				i40e_free_tx_resources(vsi->xdp_rings_3[i]);
+		}
 	}
 }
 
@@ -3312,8 +3320,11 @@ static int i40e_vsi_configure_tx(struct i40e_vsi *vsi)
 	if (!i40e_enabled_xdp_vsi(vsi))
 		return err;
 
-	for (i = 0; (i < vsi->num_queue_pairs) && !err; i++)
+	for (i = 0; (i < vsi->num_queue_pairs) && !err; i++) {
 		err = i40e_configure_tx_ring(vsi->xdp_rings[i]);
+		err |= i40e_configure_tx_ring(vsi->xdp_rings_2[i]);
+		err |= i40e_configure_tx_ring(vsi->xdp_rings_3[i]);
+	}
 
 	return err;
 }
@@ -3454,7 +3465,7 @@ static void i40e_vsi_configure_msix(struct i40e_vsi *vsi)
 	struct i40e_hw *hw = &pf->hw;
 	u16 vector;
 	int i, q;
-	u32 qp;
+	u32 qp, off = 0;
 
 	/* The interrupt indexing is offset by 1 in the PFINT_ITRn
 	 * and PFINT_LNKLSTn registers, e.g.:
@@ -3483,9 +3494,9 @@ static void i40e_vsi_configure_msix(struct i40e_vsi *vsi)
 		     i40e_intrl_usec_to_reg(vsi->int_rate_limit));
 
 		/* Linked list for the queuepairs assigned to this vector */
-		wr32(hw, I40E_PFINT_LNKLSTN(vector - 1), qp);
+		wr32(hw, I40E_PFINT_LNKLSTN(vector - 1), qp + off);
 		for (q = 0; q < q_vector->num_ringpairs; q++) {
-			u32 nextqp = has_xdp ? qp + vsi->alloc_queue_pairs : qp;
+			u32 nextqp = has_xdp ? (qp + vsi->alloc_queue_pairs + off*3) : qp + off;
 			u32 val;
 
 			val = I40E_QINT_RQCTL_CAUSE_ENA_MASK |
@@ -3495,23 +3506,41 @@ static void i40e_vsi_configure_msix(struct i40e_vsi *vsi)
 			      (I40E_QUEUE_TYPE_TX <<
 			       I40E_QINT_RQCTL_NEXTQ_TYPE_SHIFT);
 
-			wr32(hw, I40E_QINT_RQCTL(qp), val);
+			wr32(hw, I40E_QINT_RQCTL(qp + off), val);
 
 			if (has_xdp) {
 				val = I40E_QINT_TQCTL_CAUSE_ENA_MASK |
 				      (I40E_TX_ITR << I40E_QINT_TQCTL_ITR_INDX_SHIFT) |
 				      (vector << I40E_QINT_TQCTL_MSIX_INDX_SHIFT) |
-				      (qp << I40E_QINT_TQCTL_NEXTQ_INDX_SHIFT) |
+				      ((nextqp + 1) << I40E_QINT_TQCTL_NEXTQ_INDX_SHIFT) |
 				      (I40E_QUEUE_TYPE_TX <<
 				       I40E_QINT_TQCTL_NEXTQ_TYPE_SHIFT);
 
 				wr32(hw, I40E_QINT_TQCTL(nextqp), val);
+
+				val = I40E_QINT_TQCTL_CAUSE_ENA_MASK |
+				      (I40E_TX_ITR << I40E_QINT_TQCTL_ITR_INDX_SHIFT) |
+				      (vector << I40E_QINT_TQCTL_MSIX_INDX_SHIFT) |
+				      ((nextqp + 2) << I40E_QINT_TQCTL_NEXTQ_INDX_SHIFT) |
+				      (I40E_QUEUE_TYPE_TX <<
+				       I40E_QINT_TQCTL_NEXTQ_TYPE_SHIFT);
+
+				wr32(hw, I40E_QINT_TQCTL(nextqp + 1), val);
+
+				val = I40E_QINT_TQCTL_CAUSE_ENA_MASK |
+				      (I40E_TX_ITR << I40E_QINT_TQCTL_ITR_INDX_SHIFT) |
+				      (vector << I40E_QINT_TQCTL_MSIX_INDX_SHIFT) |
+				      ((qp + off) << I40E_QINT_TQCTL_NEXTQ_INDX_SHIFT) |
+				      (I40E_QUEUE_TYPE_TX <<
+				       I40E_QINT_TQCTL_NEXTQ_TYPE_SHIFT);
+
+				wr32(hw, I40E_QINT_TQCTL(nextqp + 2), val);
 			}
 
 			val = I40E_QINT_TQCTL_CAUSE_ENA_MASK |
 			      (I40E_TX_ITR << I40E_QINT_TQCTL_ITR_INDX_SHIFT) |
 			      (vector << I40E_QINT_TQCTL_MSIX_INDX_SHIFT) |
-			      ((qp + 1) << I40E_QINT_TQCTL_NEXTQ_INDX_SHIFT) |
+			      ((qp + 1 + off) << I40E_QINT_TQCTL_NEXTQ_INDX_SHIFT) |
 			      (I40E_QUEUE_TYPE_RX <<
 			       I40E_QINT_TQCTL_NEXTQ_TYPE_SHIFT);
 
@@ -3520,8 +3549,8 @@ static void i40e_vsi_configure_msix(struct i40e_vsi *vsi)
 				val |= (I40E_QUEUE_END_OF_LIST <<
 					I40E_QINT_TQCTL_NEXTQ_INDX_SHIFT);
 
-			wr32(hw, I40E_QINT_TQCTL(qp), val);
-			qp++;
+			wr32(hw, I40E_QINT_TQCTL(qp + off), val);
+			off++;
 		}
 	}
 
@@ -3602,6 +3631,8 @@ static void i40e_configure_msi_and_legacy(struct i40e_vsi *vsi)
 	wr32(hw, I40E_QINT_RQCTL(0), val);
 
 	if (i40e_enabled_xdp_vsi(vsi)) {
+		// XXX
+		WARN(1, "Not implemented!\n");
 		val = I40E_QINT_TQCTL_CAUSE_ENA_MASK		     |
 		      (I40E_TX_ITR << I40E_QINT_TQCTL_ITR_INDX_SHIFT)|
 		      (I40E_QUEUE_TYPE_TX
@@ -3793,7 +3824,16 @@ static void i40e_vsi_disable_irq(struct i40e_vsi *vsi)
 
 		if (!i40e_enabled_xdp_vsi(vsi))
 			continue;
-		wr32(hw, I40E_QINT_TQCTL(vsi->xdp_rings[i]->reg_idx), 0);
+
+		val = rd32(hw, I40E_QINT_TQCTL(vsi->xdp_rings[i]->reg_idx));
+		val &= ~I40E_QINT_TQCTL_CAUSE_ENA_MASK;
+		wr32(hw, I40E_QINT_TQCTL(vsi->xdp_rings[i]->reg_idx), val);
+		val = rd32(hw, I40E_QINT_TQCTL(vsi->xdp_rings_2[i]->reg_idx));
+		val &= ~I40E_QINT_TQCTL_CAUSE_ENA_MASK;
+		wr32(hw, I40E_QINT_TQCTL(vsi->xdp_rings_2[i]->reg_idx), val);
+		val = rd32(hw, I40E_QINT_TQCTL(vsi->xdp_rings_3[i]->reg_idx));
+		val &= ~I40E_QINT_TQCTL_CAUSE_ENA_MASK;
+		wr32(hw, I40E_QINT_TQCTL(vsi->xdp_rings_3[i]->reg_idx), val);
 	}
 
 	/* disable each interrupt */
@@ -4111,6 +4151,20 @@ static void i40e_map_vector_to_qp(struct i40e_vsi *vsi, int v_idx, int qp_idx)
 		xdp_ring->next = q_vector->tx.ring;
 		q_vector->tx.ring = xdp_ring;
 		q_vector->tx.count++;
+
+		xdp_ring = vsi->xdp_rings_2[qp_idx];
+
+		xdp_ring->q_vector = q_vector;
+		xdp_ring->next = q_vector->tx.ring;
+		q_vector->tx.ring = xdp_ring;
+		q_vector->tx.count++;
+
+		xdp_ring = vsi->xdp_rings_3[qp_idx];
+
+		xdp_ring->q_vector = q_vector;
+		xdp_ring->next = q_vector->tx.ring;
+		q_vector->tx.ring = xdp_ring;
+		q_vector->tx.count++;
 	}
 
 	rx_ring->q_vector = q_vector;
@@ -4341,8 +4395,16 @@ static int i40e_vsi_control_tx(struct i40e_vsi *vsi, bool enable)
 			continue;
 
 		ret = i40e_control_wait_tx_q(vsi->seid, pf,
-					     pf_q + vsi->alloc_queue_pairs,
+					     pf_q + vsi->alloc_queue_pairs + i*3,
 					     true /*is xdp*/, enable);
+		ret |= i40e_control_wait_tx_q(vsi->seid, pf,
+					     pf_q + vsi->alloc_queue_pairs + i*3 + 1,
+					     true /*is xdp*/, enable);
+		ret |= i40e_control_wait_tx_q(vsi->seid, pf,
+					     pf_q + vsi->alloc_queue_pairs + i*3 + 2,
+					     true /*is xdp*/, enable);
+
+
 		if (ret)
 			break;
 	}
@@ -4885,6 +4947,26 @@ int i40e_vsi_wait_queues_disabled(struct i40e_vsi *vsi)
 				 vsi->seid, pf_q);
 			return ret;
 		}
+
+		ret = i40e_pf_txq_wait(pf, pf_q + vsi->alloc_queue_pairs + 1,
+				       false);
+		if (ret) {
+			dev_info(&pf->pdev->dev,
+				 "VSI seid %d XDP Tx 2 ring %d disable timeout\n",
+				 vsi->seid, pf_q + 1);
+			return ret;
+		}
+
+		ret = i40e_pf_txq_wait(pf, pf_q + vsi->alloc_queue_pairs + 2,
+				       false);
+		if (ret) {
+			dev_info(&pf->pdev->dev,
+				 "VSI seid %d XDP Tx 3 ring %d disable timeout\n",
+				 vsi->seid, pf_q + 2);
+			return ret;
+		}
+
+
 wait_rx:
 		/* Check and wait for the Rx queue */
 		ret = i40e_pf_rxq_wait(pf, pf_q, false);
@@ -6722,8 +6804,11 @@ void i40e_down(struct i40e_vsi *vsi)
 
 	for (i = 0; i < vsi->num_queue_pairs; i++) {
 		i40e_clean_tx_ring(vsi->tx_rings[i]);
-		if (i40e_enabled_xdp_vsi(vsi))
+		if (i40e_enabled_xdp_vsi(vsi)) {
 			i40e_clean_tx_ring(vsi->xdp_rings[i]);
+			i40e_clean_tx_ring(vsi->xdp_rings_2[i]);
+			i40e_clean_tx_ring(vsi->xdp_rings_3[i]);
+		}
 		i40e_clean_rx_ring(vsi->rx_rings[i]);
 	}
 
@@ -10008,13 +10093,17 @@ static int i40e_vsi_alloc_arrays(struct i40e_vsi *vsi, bool alloc_qvectors)
 
 	/* allocate memory for both Tx, XDP Tx and Rx ring pointers */
 	size = sizeof(struct i40e_ring *) * vsi->alloc_queue_pairs *
-	       (i40e_enabled_xdp_vsi(vsi) ? 3 : 2);
+	       (i40e_enabled_xdp_vsi(vsi) ? 5 : 2);
 	vsi->tx_rings = kzalloc(size, GFP_KERNEL);
 	if (!vsi->tx_rings)
 		return -ENOMEM;
 	next_rings = vsi->tx_rings + vsi->alloc_queue_pairs;
 	if (i40e_enabled_xdp_vsi(vsi)) {
 		vsi->xdp_rings = next_rings;
+		next_rings += vsi->alloc_queue_pairs;
+		vsi->xdp_rings_2 = next_rings;
+		next_rings += vsi->alloc_queue_pairs;
+		vsi->xdp_rings_3 = next_rings;
 		next_rings += vsi->alloc_queue_pairs;
 	}
 	vsi->rx_rings = next_rings;
@@ -10138,6 +10227,8 @@ static void i40e_vsi_free_arrays(struct i40e_vsi *vsi, bool free_qvectors)
 	vsi->tx_rings = NULL;
 	vsi->rx_rings = NULL;
 	vsi->xdp_rings = NULL;
+	vsi->xdp_rings_2 = NULL;
+	vsi->xdp_rings_3 = NULL;
 }
 
 /**
@@ -10220,8 +10311,11 @@ static void i40e_vsi_clear_rings(struct i40e_vsi *vsi)
 			kfree_rcu(vsi->tx_rings[i], rcu);
 			vsi->tx_rings[i] = NULL;
 			vsi->rx_rings[i] = NULL;
-			if (vsi->xdp_rings)
+			if (vsi->xdp_rings) {
 				vsi->xdp_rings[i] = NULL;
+				vsi->xdp_rings_2[i] = NULL;
+				vsi->xdp_rings_3[i] = NULL;
+			}
 		}
 	}
 }
@@ -10232,7 +10326,7 @@ static void i40e_vsi_clear_rings(struct i40e_vsi *vsi)
  **/
 static int i40e_alloc_rings(struct i40e_vsi *vsi)
 {
-	int i, qpv = i40e_enabled_xdp_vsi(vsi) ? 3 : 2;
+	int i, qpv = i40e_enabled_xdp_vsi(vsi) ? 5 : 2;
 	struct i40e_pf *pf = vsi->back;
 	struct i40e_ring *ring;
 
@@ -10243,6 +10337,7 @@ static int i40e_alloc_rings(struct i40e_vsi *vsi)
 		if (!ring)
 			goto err_out;
 
+		ring->idx = i;
 		ring->queue_index = i;
 		ring->reg_idx = vsi->base_queue + i;
 		ring->ring_active = false;
@@ -10260,7 +10355,8 @@ static int i40e_alloc_rings(struct i40e_vsi *vsi)
 		if (!i40e_enabled_xdp_vsi(vsi))
 			goto setup_rx;
 
-		ring->queue_index = vsi->alloc_queue_pairs + i;
+		ring->idx = i;
+		ring->queue_index = vsi->alloc_queue_pairs + i*3;
 		ring->reg_idx = vsi->base_queue + ring->queue_index;
 		ring->ring_active = false;
 		ring->vsi = vsi;
@@ -10275,7 +10371,40 @@ static int i40e_alloc_rings(struct i40e_vsi *vsi)
 		ring->itr_setting = pf->tx_itr_default;
 		vsi->xdp_rings[i] = ring++;
 
+		ring->idx = i;
+		ring->queue_index = vsi->alloc_queue_pairs + i*3 + 1;
+		ring->reg_idx = vsi->base_queue + ring->queue_index;
+		ring->ring_active = false;
+		ring->vsi = vsi;
+		ring->netdev = NULL;
+		ring->dev = &pf->pdev->dev;
+		ring->count = vsi->num_desc;
+		ring->size = 0;
+		ring->dcb_tc = 0;
+		if (vsi->back->hw_features & I40E_HW_WB_ON_ITR_CAPABLE)
+			ring->flags = I40E_TXR_FLAGS_WB_ON_ITR;
+		set_ring_xdp(ring);
+		ring->itr_setting = pf->tx_itr_default;
+		vsi->xdp_rings_2[i] = ring++;
+
+		ring->idx = i;
+		ring->queue_index = vsi->alloc_queue_pairs + i*3 + 2;
+		ring->reg_idx = vsi->base_queue + ring->queue_index;
+		ring->ring_active = false;
+		ring->vsi = vsi;
+		ring->netdev = NULL;
+		ring->dev = &pf->pdev->dev;
+		ring->count = vsi->num_desc;
+		ring->size = 0;
+		ring->dcb_tc = 0;
+		if (vsi->back->hw_features & I40E_HW_WB_ON_ITR_CAPABLE)
+			ring->flags = I40E_TXR_FLAGS_WB_ON_ITR;
+		set_ring_xdp(ring);
+		ring->itr_setting = pf->tx_itr_default;
+		vsi->xdp_rings_3[i] = ring++;
+
 setup_rx:
+		ring->idx = i;
 		ring->queue_index = i;
 		ring->reg_idx = vsi->base_queue + i;
 		ring->ring_active = false;
@@ -11950,8 +12079,11 @@ static void i40e_queue_pair_reset_stats(struct i40e_vsi *vsi, int queue_pair)
 static void i40e_queue_pair_clean_rings(struct i40e_vsi *vsi, int queue_pair)
 {
 	i40e_clean_tx_ring(vsi->tx_rings[queue_pair]);
-	if (i40e_enabled_xdp_vsi(vsi))
+	if (i40e_enabled_xdp_vsi(vsi)) {
 		i40e_clean_tx_ring(vsi->xdp_rings[queue_pair]);
+		i40e_clean_tx_ring(vsi->xdp_rings_2[queue_pair]);
+		i40e_clean_tx_ring(vsi->xdp_rings_3[queue_pair]);
+	}
 	i40e_clean_rx_ring(vsi->rx_rings[queue_pair]);
 }
 
@@ -12028,6 +12160,24 @@ static int i40e_queue_pair_toggle_rings(struct i40e_vsi *vsi, int queue_pair,
 		dev_info(&pf->pdev->dev,
 			 "VSI seid %d XDP Tx ring %d %sable timeout\n",
 			 vsi->seid, pf_q, (enable ? "en" : "dis"));
+	}
+
+	ret = i40e_control_wait_tx_q(vsi->seid, pf,
+				     pf_q + vsi->alloc_queue_pairs + 1,
+				     true /*is xdp*/, enable);
+	if (ret) {
+		dev_info(&pf->pdev->dev,
+			 "VSI seid %d XDP Tx ring %d %sable timeout\n",
+			 vsi->seid, pf_q + 1, (enable ? "en" : "dis"));
+	}
+
+	ret = i40e_control_wait_tx_q(vsi->seid, pf,
+				     pf_q + vsi->alloc_queue_pairs + 2,
+				     true /*is xdp*/, enable);
+	if (ret) {
+		dev_info(&pf->pdev->dev,
+			 "VSI seid %d XDP Tx ring %d %sable timeout\n",
+			 vsi->seid, pf_q + 2, (enable ? "en" : "dis"));
 	}
 
 	return ret;
@@ -12126,6 +12276,8 @@ int i40e_queue_pair_enable(struct i40e_vsi *vsi, int queue_pair)
 
 	if (i40e_enabled_xdp_vsi(vsi)) {
 		err = i40e_configure_tx_ring(vsi->xdp_rings[queue_pair]);
+		err |= i40e_configure_tx_ring(vsi->xdp_rings_2[queue_pair]);
+		err |= i40e_configure_tx_ring(vsi->xdp_rings_3[queue_pair]);
 		if (err)
 			return err;
 	}
@@ -12829,7 +12981,7 @@ static struct i40e_vsi *i40e_vsi_reinit_setup(struct i40e_vsi *vsi)
 		goto err_vsi;
 
 	alloc_queue_pairs = vsi->alloc_queue_pairs *
-			    (i40e_enabled_xdp_vsi(vsi) ? 2 : 1);
+			    (i40e_enabled_xdp_vsi(vsi) ? 4 : 1);
 
 	ret = i40e_get_lump(pf, pf->qp_pile, alloc_queue_pairs, vsi->idx);
 	if (ret < 0) {
@@ -12980,7 +13132,7 @@ struct i40e_vsi *i40e_vsi_setup(struct i40e_pf *pf, u8 type,
 		vsi->vf_id = param1;
 	/* assign it some queues */
 	alloc_queue_pairs = vsi->alloc_queue_pairs *
-			    (i40e_enabled_xdp_vsi(vsi) ? 2 : 1);
+			    (i40e_enabled_xdp_vsi(vsi) ? 4 : 1);
 
 	ret = i40e_get_lump(pf, pf->qp_pile, alloc_queue_pairs, vsi->idx);
 	if (ret < 0) {
