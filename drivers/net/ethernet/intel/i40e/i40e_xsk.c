@@ -818,6 +818,45 @@ static void i40e_clean_xdp_tx_buffer(struct i40e_ring *tx_ring,
 	dma_unmap_len_set(tx_bi, len, 0);
 }
 
+
+#if 1
+bool i40e_clean_xdp_tx_irq(struct i40e_vsi *vsi,
+			   struct i40e_ring *tx_ring, int napi_budget)
+{
+	struct xdp_umem *umem = tx_ring->xsk_umem;
+	u32 head_idx = i40e_get_head(tx_ring);
+	unsigned int budget = vsi->work_limit;
+	bool work_done = true, xmit_done;
+	u32 completed_frames;
+	u32 frames_ready;
+
+	if (head_idx < tx_ring->next_to_clean)
+		head_idx += tx_ring->count;
+	frames_ready = head_idx - tx_ring->next_to_clean;
+
+	if (frames_ready == 0) {
+		goto out_xmit;
+	} else if (frames_ready > budget) {
+		completed_frames = budget;
+		work_done = false;
+	} else {
+		completed_frames = frames_ready;
+	}
+
+	tx_ring->next_to_clean += completed_frames;
+	if (unlikely(tx_ring->next_to_clean >= tx_ring->count))
+		tx_ring->next_to_clean -= tx_ring->count;
+
+	xsk_umem_complete_tx(umem, completed_frames);
+
+	i40e_arm_wb(tx_ring, vsi, budget);
+
+out_xmit:
+	xmit_done = i40e_xmit_zc(tx_ring, budget);
+
+	return work_done && xmit_done;
+}
+#else
 /**
  * i40e_clean_xdp_tx_irq - Completes AF_XDP entries, and cleans XDP entries
  * @tx_ring: XDP Tx ring
@@ -880,6 +919,7 @@ out_xmit:
 
 	return work_done && xmit_done;
 }
+#endif
 
 /**
  * i40e_xsk_async_xmit - Implements the ndo_xsk_async_xmit
