@@ -9,6 +9,12 @@
 #include "i40e_txrx_common.h"
 #include "i40e_xsk.h"
 
+int __bpf_xdp_xsk_redirect_2(struct xdp_buff *xdp, struct bpf_redirect_info *ri, struct xdp_sock *xsk);
+int xdp_do_redirect_2(struct net_device *dev, struct xdp_buff *xdp,
+		      struct bpf_prog *xdp_prog, struct bpf_redirect_info *ri);
+void xdp_do_flush_map_2(struct bpf_redirect_info *ri);
+
+
 /**
  * i40e_alloc_xsk_umems - Allocate an array to store per ring UMEMs
  * @vsi: Current VSI
@@ -280,7 +286,7 @@ int i40e_xsk_umem_setup(struct i40e_vsi *vsi, struct xdp_umem *umem,
  *
  * Returns any of I40E_XDP_{PASS, CONSUMED, TX, REDIR}
  **/
-static int i40e_run_xdp_zc(struct i40e_ring *rx_ring, struct xdp_buff *xdp)
+static int i40e_run_xdp_zc(struct i40e_ring *rx_ring, struct xdp_buff *xdp, struct bpf_redirect_info *ri)
 {
 	struct i40e_ring *xdp_ring;
 	struct bpf_prog *xdp_prog;
@@ -292,10 +298,13 @@ static int i40e_run_xdp_zc(struct i40e_ring *rx_ring, struct xdp_buff *xdp)
 	 * this path is enabled by setting an XDP program.
 	 */
 	xdp_prog = READ_ONCE(rx_ring->xdp_prog);
-	act = bpf_prog_run_xdp(xdp_prog, xdp);
+	//act = bpf_prog_run_xdp(xdp_prog, xdp);
+	if (xdp_prog->xsk_builtin)
+		act = __bpf_xdp_xsk_redirect_2(xdp, ri, xdp->rxq->xsk);
+
 	xdp->handle += xdp->data - xdp->data_hard_start;
 	if (likely(act == XDP_REDIRECT)) {
-		err = xdp_do_redirect(rx_ring->netdev, xdp, xdp_prog);
+		err = xdp_do_redirect_2(rx_ring->netdev, xdp, xdp_prog, ri);
 		result = !err ? I40E_XDP_REDIR : I40E_XDP_CONSUMED;
 	} else if(act == XDP_TX) {
 		xdp_ring = rx_ring->vsi->xdp_rings[rx_ring->queue_index];
@@ -623,6 +632,7 @@ int i40e_clean_rx_irq_zc(struct i40e_ring *rx_ring, int budget)
 	bool failure = false;
 	struct sk_buff *skb;
 	struct xdp_buff xdp;
+	struct bpf_redirect_info ri = {};
 
 	xdp.rxq = &rx_ring->xdp_rxq;
 	rx_ring->xdp_rxq.xsk = rx_ring->netdev->_rx[rx_ring->queue_index].xsk;
@@ -673,7 +683,7 @@ int i40e_clean_rx_irq_zc(struct i40e_ring *rx_ring, int budget)
 		xdp.data_end = xdp.data + size;
 		xdp.handle = bi->handle;
 
-		xdp_res = i40e_run_xdp_zc(rx_ring, &xdp);
+		xdp_res = i40e_run_xdp_zc(rx_ring, &xdp, &ri);
 		if (xdp_res) {
 			if (xdp_res & (I40E_XDP_TX | I40E_XDP_REDIR)) {
 				xdp_xmit |= xdp_res;
@@ -724,7 +734,16 @@ int i40e_clean_rx_irq_zc(struct i40e_ring *rx_ring, int budget)
 
 	rx_ring->xdp_rxq.xsk = NULL;
 
-	i40e_finalize_xdp_rx(rx_ring, xdp_xmit);
+	if (xdp_xmit & I40E_XDP_REDIR)
+		xdp_do_flush_map_2(&ri);
+
+	if (xdp_xmit & I40E_XDP_TX) {
+		struct i40e_ring *xdp_ring =
+			rx_ring->vsi->xdp_rings[rx_ring->queue_index];
+
+		i40e_xdp_ring_update_tail(xdp_ring);
+	}
+
 	i40e_update_rx_stats(rx_ring, total_rx_bytes, total_rx_packets);
 	return failure ? budget : (int)total_rx_packets;
 }

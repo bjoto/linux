@@ -3274,6 +3274,35 @@ void xdp_do_flush_map(void)
 }
 EXPORT_SYMBOL_GPL(xdp_do_flush_map);
 
+void xdp_do_flush_map_2(struct bpf_redirect_info *ri)
+{
+	struct bpf_map *map = ri->map_to_flush;
+	struct xdp_sock *xsk = ri->xsk_to_flush;
+
+	ri->xsk_to_flush = NULL;
+	if (xsk)
+		xsk_flush(xsk);
+
+	ri->map_to_flush = NULL;
+	if (map) {
+		switch (map->map_type) {
+		case BPF_MAP_TYPE_DEVMAP:
+			__dev_map_flush(map);
+			break;
+		case BPF_MAP_TYPE_CPUMAP:
+			__cpu_map_flush(map);
+			break;
+		case BPF_MAP_TYPE_XSKMAP:
+			__xsk_map_flush(map);
+			break;
+		default:
+			break;
+		}
+	}
+}
+EXPORT_SYMBOL_GPL(xdp_do_flush_map_2);
+
+
 static inline void *__xdp_map_lookup_elem(struct bpf_map *map, u32 index)
 {
 	switch (map->map_type) {
@@ -3363,6 +3392,21 @@ int xdp_do_redirect(struct net_device *dev, struct xdp_buff *xdp,
 	return xdp_do_redirect_slow(dev, xdp, xdp_prog, ri);
 }
 EXPORT_SYMBOL_GPL(xdp_do_redirect);
+
+int xdp_do_redirect_2(struct net_device *dev, struct xdp_buff *xdp,
+		      struct bpf_prog *xdp_prog, struct bpf_redirect_info *ri)
+{
+	struct bpf_map *map = READ_ONCE(ri->map);
+
+	if (ri->xsk)
+		return xdp_do_xsk_redirect(dev, xdp, xdp_prog, ri);
+	else if (map)
+		return xdp_do_redirect_map(dev, xdp, xdp_prog, map, ri);
+
+	return xdp_do_redirect_slow(dev, xdp, xdp_prog, ri);
+}
+EXPORT_SYMBOL_GPL(xdp_do_redirect_2);
+
 
 static int xdp_do_generic_redirect_map(struct net_device *dev,
 				       struct sk_buff *skb,
@@ -3505,6 +3549,20 @@ int __bpf_xdp_xsk_redirect(struct xdp_buff *xdp)
 	return XDP_REDIRECT;
 }
 EXPORT_SYMBOL(__bpf_xdp_xsk_redirect);
+
+int __bpf_xdp_xsk_redirect_2(struct xdp_buff *xdp, struct bpf_redirect_info *ri, struct xdp_sock *xsk)
+{
+	// XXX: keep flags as last arg, e.g to change default return
+	// from XDP_PASS to XDP_DROP?
+
+	if (!xsk)
+		return XDP_PASS;
+
+	ri->xsk = xsk;
+	return XDP_REDIRECT;
+}
+EXPORT_SYMBOL(__bpf_xdp_xsk_redirect_2);
+
 
 BPF_CALL_2(bpf_xdp_xsk_redirect, struct xdp_buff *, xdp, u64, flags)
 {
