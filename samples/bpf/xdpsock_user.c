@@ -121,6 +121,7 @@ struct xdpsock {
 	unsigned long prev_tx_npkts;
 	const char *ifs;
 	int ifindex;
+	int tx_idx;
 };
 
 static int num_socks;
@@ -863,8 +864,8 @@ static void rx_drop(struct xdpsock *xsk)
 
 static void rx_drop_all(void)
 {
-	struct pollfd fds[MAX_SOCKS + 1];
-	int i, ret, timeout, nfds = 1;
+	struct pollfd fds[MAX_SOCKS];
+	int i, ret, timeout;
 
 	memset(fds, 0, sizeof(fds));
 
@@ -876,7 +877,7 @@ static void rx_drop_all(void)
 
 	for (;;) {
 		if (opt_poll) {
-			ret = poll(fds, nfds, timeout);
+			ret = poll(fds, num_socks, timeout);
 			if (ret <= 0)
 				continue;
 		}
@@ -888,14 +889,12 @@ static void rx_drop_all(void)
 
 static void tx_only(struct xdpsock *xsk)
 {
-	unsigned int idx = 0;
-
 	if (xq_nb_free(&xsk->tx, BATCH_SIZE) >= BATCH_SIZE) {
-		lassert(xq_enq_tx_only(&xsk->tx, idx, BATCH_SIZE) == 0);
+		lassert(xq_enq_tx_only(&xsk->tx, xsk->tx_idx, BATCH_SIZE) == 0);
 
 		xsk->outstanding_tx += BATCH_SIZE;
-		idx += BATCH_SIZE;
-		idx %= NUM_FRAMES;
+		xsk->tx_idx += BATCH_SIZE;
+		xsk->tx_idx %= NUM_FRAMES;
 	}
 
 	complete_tx_only(xsk);
@@ -903,8 +902,8 @@ static void tx_only(struct xdpsock *xsk)
 
 static void tx_only_all(void)
 {
-	struct pollfd fds[MAX_SOCKS + 1];
-	int i, ret, timeout, nfds = 1;
+	struct pollfd fds[MAX_SOCKS];
+	int i, ret, timeout;
 
 	memset(fds, 0, sizeof(fds));
 
@@ -916,7 +915,7 @@ static void tx_only_all(void)
 
 	for (;;) {
 		if (opt_poll) {
-			ret = poll(fds, nfds, timeout);
+			ret = poll(fds, num_socks, timeout);
 			if (ret <= 0)
 				continue;
 		}
