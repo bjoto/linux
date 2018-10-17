@@ -559,6 +559,7 @@ static struct xdpsock *xsk_configure(struct xdp_umem *umem, const char *ifs, int
 		sxdp.sxdp_shared_umem_fd = umem->fd;
 	} else {
 		sxdp.sxdp_flags = opt_xdp_bind_flags;
+		sxdp.sxdp_flags |= XDP_ATTACH;
 	}
 
 	lassert(bind(sfd, (struct sockaddr *)&sxdp, sizeof(sxdp)) == 0);
@@ -642,8 +643,10 @@ static void int_exit(int sig)
 
 	(void)sig;
 	dump_stats();
+#if 0
 	for (i = 0; i < num_ifs; i++)
 		bpf_set_link_xdp_fd(opt_ifindex[i], -1, opt_xdp_flags);
+#endif
 	exit(EXIT_SUCCESS);
 }
 
@@ -944,6 +947,7 @@ int main(int argc, char **argv)
 		exit(EXIT_FAILURE);
 	}
 
+#if 0
 	for (i = 0; i < num_ifs; i++) {
 		snprintf(xdp_filename, sizeof(xdp_filename), "%s_kern.o", argv[0]);
 		prog_load_attr.file = xdp_filename;
@@ -983,11 +987,12 @@ int main(int argc, char **argv)
 			exit(EXIT_FAILURE);
 		}
 	}
-
+#endif
 	/* Create sockets... */
 	for (i = 0; i < num_ifs; i++)
 		xsks[num_socks++] = xsk_configure(NULL, opt_if[i], opt_ifindex[i]);
 
+#if 0
 #if RR_LB
 	for (i = 0; i < MAX_SOCKS - 1; i++)
 		xsks[num_socks++] = xsk_configure(xsks[0]->umem);
@@ -1010,7 +1015,7 @@ int main(int argc, char **argv)
 		}
 	}
 #endif
-
+#endif
 	signal(SIGINT, int_exit);
 	signal(SIGTERM, int_exit);
 	signal(SIGABRT, int_exit);
