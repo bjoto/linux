@@ -358,7 +358,7 @@ static void xsk_rx_busy_loop(struct xdp_sock *xs, int nonblock)
 static unsigned int xsk_poll(struct file *file, struct socket *sock,
 			     struct poll_table_struct *wait)
 {
-	unsigned int mask = datagram_poll(file, sock, wait);
+	unsigned int mask = 0;//datagram_poll(file, sock, wait);
 	struct sock *sk = sock->sk;
 	struct xdp_sock *xs = xdp_sk(sk);
 	__poll_t events = poll_requested_events(wait);

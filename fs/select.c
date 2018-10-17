@@ -875,8 +875,8 @@ static int do_poll(struct poll_list *list, struct poll_wqueues *wait,
 					count++;
 					pt->_qproc = NULL;
 					/* found something, stop busy polling */
-					busy_flag = 0;
-					can_busy_loop = false;
+					//busy_flag = 0;
+					//can_busy_loop = false;
 				}
 			}
 		}
