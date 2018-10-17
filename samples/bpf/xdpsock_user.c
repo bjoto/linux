@@ -44,15 +44,15 @@
 #define PF_XDP AF_XDP
 #endif
 
-#define NUM_FRAMES 131072
+#define NUM_FRAMES 1024 * 2
 #define FRAME_HEADROOM 0
 #define FRAME_SHIFT 11
 #define FRAME_SIZE 2048
-#define NUM_DESCS 1024
-#define BATCH_SIZE 16
+#define NUM_DESCS 1024 * 2
+#define BATCH_SIZE 64
 
-#define FQ_NUM_DESCS 1024
-#define CQ_NUM_DESCS 1024
+#define FQ_NUM_DESCS 1024 * 2
+#define CQ_NUM_DESCS 1024 * 2
 
 #define DEBUG_HEXDUMP 0
 
@@ -76,6 +76,7 @@ static int opt_poll;
 static int opt_shared_packet_buffer;
 static int opt_interval = 1;
 static u32 opt_xdp_bind_flags;
+static int opt_inorder_completion;
 
 static int num_ifs;
 
@@ -199,6 +200,11 @@ static inline u32 umem_nb_avail(struct xdp_umem_uqueue *q, u32 nb)
 	}
 
 	return (entries > nb) ? nb : entries;
+}
+
+static inline u32 umem_nb_avail_raw(struct xdp_umem_uqueue *q)
+{
+	return *q->producer;
 }
 
 static inline u32 xq_nb_avail(struct xdp_uqueue *q, u32 ndescs)
@@ -466,6 +472,14 @@ static struct xdp_umem *xdp_umem_configure(int sfd)
 	umem->frames = bufs;
 	umem->fd = sfd;
 
+
+	if (opt_inorder_completion) {
+		u64 flags = 0;
+
+		lassert(setsockopt(sfd, SOL_XDP, XDP_INORDER_COMPLETION,
+				   &flags, sizeof(u64)) == 0);
+	}
+
 	if (opt_bench == BENCH_TXONLY) {
 		int i;
 
@@ -663,6 +677,7 @@ static struct option long_options[] = {
 	{"interval", required_argument, 0, 'n'},
 	{"zero-copy", no_argument, 0, 'z'},
 	{"copy", no_argument, 0, 'c'},
+	{"inorder", no_argument, 0, 'o'},
 	{0, 0, 0, 0}
 };
 
@@ -683,6 +698,7 @@ static void usage(const char *prog)
 		"  -n, --interval=n	Specify statistics update interval (default 1 sec).\n"
 		"  -z, --zero-copy      Force zero-copy mode.\n"
 		"  -c, --copy           Force copy mode.\n"
+		"  -o, --inorder        Inorder completion mode.\n"
 		"\n";
 	fprintf(stderr, str, prog);
 	exit(EXIT_FAILURE);
@@ -695,7 +711,7 @@ static void parse_command_line(int argc, char **argv)
 	opterr = 0;
 
 	for (;;) {
-		c = getopt_long(argc, argv, "rtli:q:psSNn:cz", long_options,
+		c = getopt_long(argc, argv, "rtli:q:psSNn:czo", long_options,
 				&option_index);
 		if (c == -1)
 			break;
@@ -749,6 +765,9 @@ static void parse_command_line(int argc, char **argv)
 		case 'c':
 			opt_xdp_bind_flags |= XDP_COPY;
 			break;
+		case 'o':
+			opt_inorder_completion = 1;
+			break;
 		default:
 			usage(basename(argv[0]));
 		}
@@ -794,18 +813,29 @@ static inline void complete_tx_l2fwd(struct xdpsock *xsk)
 
 static inline void complete_tx_only(struct xdpsock *xsk)
 {
-	u64 descs[BATCH_SIZE];
 	unsigned int rcvd;
 
 	if (!xsk->outstanding_tx)
 		return;
 
 	kick_tx(xsk->sfd);
+	if (opt_inorder_completion) {
+		rcvd = umem_nb_avail_raw(&xsk->umem->cq) - xsk->tx_npkts;
 
-	rcvd = umem_complete_from_kernel(&xsk->umem->cq, descs, BATCH_SIZE);
-	if (rcvd > 0) {
-		xsk->outstanding_tx -= rcvd;
-		xsk->tx_npkts += rcvd;
+		if (rcvd > 0) {
+			xsk->outstanding_tx -= rcvd;
+			xsk->tx_npkts += rcvd;
+		}
+	} else {
+		u64 descs[BATCH_SIZE];
+
+		rcvd = umem_complete_from_kernel(&xsk->umem->cq, descs,
+						 BATCH_SIZE);
+		if (rcvd > 0) {
+			xsk->outstanding_tx -= rcvd;
+			xsk->tx_npkts += rcvd;
+		}
+
 	}
 }
 
