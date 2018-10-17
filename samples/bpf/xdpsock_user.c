@@ -69,13 +69,15 @@ enum benchmark_type {
 
 static enum benchmark_type opt_bench = BENCH_RXDROP;
 static u32 opt_xdp_flags;
-static const char *opt_if = "";
-static int opt_ifindex;
+static const char *opt_if[2];
+static int opt_ifindex[2];
 static int opt_queue;
 static int opt_poll;
 static int opt_shared_packet_buffer;
 static int opt_interval = 1;
 static u32 opt_xdp_bind_flags;
+
+static int num_ifs;
 
 struct xdp_umem_uqueue {
 	u32 cached_prod;
@@ -116,6 +118,8 @@ struct xdpsock {
 	unsigned long tx_npkts;
 	unsigned long prev_rx_npkts;
 	unsigned long prev_tx_npkts;
+	const char *ifs;
+	int ifindex;
 };
 
 static int num_socks;
@@ -472,7 +476,7 @@ static struct xdp_umem *xdp_umem_configure(int sfd)
 	return umem;
 }
 
-static struct xdpsock *xsk_configure(struct xdp_umem *umem)
+static struct xdpsock *xsk_configure(struct xdp_umem *umem, const char *ifs, int ifindex)
 {
 	struct sockaddr_xdp sxdp = {};
 	struct xdp_mmap_offsets off;
@@ -543,8 +547,11 @@ static struct xdpsock *xsk_configure(struct xdp_umem *umem)
 	xsk->tx.ring = xsk->tx.map + off.tx.desc;
 	xsk->tx.cached_cons = NUM_DESCS;
 
+	xsk->ifs = ifs;
+	xsk->ifindex = ifindex;
+
 	sxdp.sxdp_family = PF_XDP;
-	sxdp.sxdp_ifindex = opt_ifindex;
+	sxdp.sxdp_ifindex = ifindex;
 	sxdp.sxdp_queue_id = opt_queue;
 
 	if (shared) {
@@ -570,7 +577,7 @@ static void print_benchmark(bool running)
 	else if (opt_bench == BENCH_L2FWD)
 		bench_str = "l2fwd";
 
-	printf("%s:%d %s ", opt_if, opt_queue, bench_str);
+	printf("%d %s ", opt_queue, bench_str);
 	if (opt_xdp_flags & XDP_FLAGS_SKB_MODE)
 		printf("xdp-skb ");
 	else if (opt_xdp_flags & XDP_FLAGS_DRV_MODE)
@@ -604,7 +611,7 @@ static void dump_stats(void)
 		tx_pps = (xsks[i]->tx_npkts - xsks[i]->prev_tx_npkts) *
 			 1000000000. / dt;
 
-		printf("\n sock%d@", i);
+		printf("\n sock%d@%s:", i, xsks[i]->ifs);
 		print_benchmark(false);
 		printf("\n");
 
@@ -631,9 +638,12 @@ static void *poller(void *arg)
 
 static void int_exit(int sig)
 {
+	int i;
+
 	(void)sig;
 	dump_stats();
-	bpf_set_link_xdp_fd(opt_ifindex, -1, opt_xdp_flags);
+	for (i = 0; i < num_ifs; i++)
+		bpf_set_link_xdp_fd(opt_ifindex[i], -1, opt_xdp_flags);
 	exit(EXIT_SUCCESS);
 }
 
@@ -698,7 +708,18 @@ static void parse_command_line(int argc, char **argv)
 			opt_bench = BENCH_L2FWD;
 			break;
 		case 'i':
-			opt_if = optarg;
+			if (num_ifs >= 2) {
+				fprintf(stderr, "ERROR: too many interface\n");
+				usage(basename(argv[0]));
+			}
+			opt_if[num_ifs] = optarg;
+			opt_ifindex[num_ifs] = if_nametoindex(optarg);
+			if (!opt_ifindex[num_ifs]) {
+				fprintf(stderr, "ERROR: interface \"%s\" does not exist\n",
+					optarg);
+				usage(basename(argv[0]));
+			}
+			num_ifs++;
 			break;
 		case 'q':
 			opt_queue = atoi(optarg);
@@ -730,10 +751,8 @@ static void parse_command_line(int argc, char **argv)
 		}
 	}
 
-	opt_ifindex = if_nametoindex(opt_if);
-	if (!opt_ifindex) {
-		fprintf(stderr, "ERROR: interface \"%s\" does not exist\n",
-			opt_if);
+	if (!num_ifs) {
+		fprintf(stderr, "ERROR: missing interface(s)\n");
 		usage(basename(argv[0]));
 	}
 }
@@ -903,7 +922,7 @@ int main(int argc, char **argv)
 	struct bpf_prog_load_attr prog_load_attr = {
 		.prog_type	= BPF_PROG_TYPE_XDP,
 	};
-	int prog_fd, qidconf_map, xsks_map;
+	int prog_fd, qidconf_map, xsks_map[2];
 	struct bpf_object *obj;
 	char xdp_filename[256];
 	struct bpf_map *map;
@@ -912,67 +931,85 @@ int main(int argc, char **argv)
 
 	parse_command_line(argc, argv);
 
+#if RR_LB
+	if (num_ifs > 1) {
+		fprintf(stderr, "ERROR: no multiport support\n");
+		exit(EXIT_FAILURE);
+	}
+#endif
+
 	if (setrlimit(RLIMIT_MEMLOCK, &r)) {
 		fprintf(stderr, "ERROR: setrlimit(RLIMIT_MEMLOCK) \"%s\"\n",
 			strerror(errno));
 		exit(EXIT_FAILURE);
 	}
 
-	snprintf(xdp_filename, sizeof(xdp_filename), "%s_kern.o", argv[0]);
-	prog_load_attr.file = xdp_filename;
+	for (i = 0; i < num_ifs; i++) {
+		snprintf(xdp_filename, sizeof(xdp_filename), "%s_kern.o", argv[0]);
+		prog_load_attr.file = xdp_filename;
 
-	if (bpf_prog_load_xattr(&prog_load_attr, &obj, &prog_fd))
-		exit(EXIT_FAILURE);
-	if (prog_fd < 0) {
-		fprintf(stderr, "ERROR: no program found: %s\n",
-			strerror(prog_fd));
-		exit(EXIT_FAILURE);
-	}
+		if (bpf_prog_load_xattr(&prog_load_attr, &obj, &prog_fd))
+			exit(EXIT_FAILURE);
+		if (prog_fd < 0) {
+			fprintf(stderr, "ERROR: no program found: %s\n",
+				strerror(prog_fd));
+			exit(EXIT_FAILURE);
+		}
 
-	map = bpf_object__find_map_by_name(obj, "qidconf_map");
-	qidconf_map = bpf_map__fd(map);
-	if (qidconf_map < 0) {
-		fprintf(stderr, "ERROR: no qidconf map found: %s\n",
-			strerror(qidconf_map));
-		exit(EXIT_FAILURE);
-	}
+		map = bpf_object__find_map_by_name(obj, "qidconf_map");
+		qidconf_map = bpf_map__fd(map);
+		if (qidconf_map < 0) {
+			fprintf(stderr, "ERROR: no qidconf map found: %s\n",
+				strerror(qidconf_map));
+			exit(EXIT_FAILURE);
+		}
 
-	map = bpf_object__find_map_by_name(obj, "xsks_map");
-	xsks_map = bpf_map__fd(map);
-	if (xsks_map < 0) {
-		fprintf(stderr, "ERROR: no xsks map found: %s\n",
-			strerror(xsks_map));
-		exit(EXIT_FAILURE);
-	}
+		map = bpf_object__find_map_by_name(obj, "xsks_map");
+		xsks_map[i] = bpf_map__fd(map);
+		if (xsks_map[i] < 0) {
+			fprintf(stderr, "ERROR: no xsks map found: %s\n",
+				strerror(xsks_map[i]));
+			exit(EXIT_FAILURE);
+		}
 
-	if (bpf_set_link_xdp_fd(opt_ifindex, prog_fd, opt_xdp_flags) < 0) {
-		fprintf(stderr, "ERROR: link set xdp fd failed\n");
-		exit(EXIT_FAILURE);
-	}
+		if (bpf_set_link_xdp_fd(opt_ifindex[i], prog_fd, opt_xdp_flags) < 0) {
+			fprintf(stderr, "ERROR: link set xdp fd failed\n");
+			exit(EXIT_FAILURE);
+		}
 
-	ret = bpf_map_update_elem(qidconf_map, &key, &opt_queue, 0);
-	if (ret) {
-		fprintf(stderr, "ERROR: bpf_map_update_elem qidconf\n");
-		exit(EXIT_FAILURE);
+		ret = bpf_map_update_elem(qidconf_map, &key, &opt_queue, 0);
+		if (ret) {
+			fprintf(stderr, "ERROR: bpf_map_update_elem qidconf\n");
+			exit(EXIT_FAILURE);
+		}
 	}
 
 	/* Create sockets... */
-	xsks[num_socks++] = xsk_configure(NULL);
+	for (i = 0; i < num_ifs; i++)
+		xsks[num_socks++] = xsk_configure(NULL, opt_if[i], opt_ifindex[i]);
 
 #if RR_LB
 	for (i = 0; i < MAX_SOCKS - 1; i++)
 		xsks[num_socks++] = xsk_configure(xsks[0]->umem);
-#endif
-
 	/* ...and insert them into the map. */
 	for (i = 0; i < num_socks; i++) {
 		key = i;
-		ret = bpf_map_update_elem(xsks_map, &key, &xsks[i]->sfd, 0);
+		ret = bpf_map_update_elem(xsks_map[0], &key, &xsks[i]->sfd, 0);
 		if (ret) {
 			fprintf(stderr, "ERROR: bpf_map_update_elem %d\n", i);
 			exit(EXIT_FAILURE);
 		}
 	}
+#else
+	key = 0;
+	for (i = 0; i < num_ifs; i++) {
+		ret = bpf_map_update_elem(xsks_map[i], &key, &xsks[i]->sfd, 0);
+		if (ret) {
+			fprintf(stderr, "ERROR: bpf_map_update_elem ifindex %d\n", i);
+			exit(EXIT_FAILURE);
+		}
+	}
+#endif
 
 	signal(SIGINT, int_exit);
 	signal(SIGTERM, int_exit);
@@ -985,12 +1022,18 @@ int main(int argc, char **argv)
 
 	prev_time = get_nsecs();
 
-	if (opt_bench == BENCH_RXDROP)
-		rx_drop_all();
-	else if (opt_bench == BENCH_TXONLY)
-		tx_only(xsks[0]);
-	else
-		l2fwd(xsks[0]);
+	if (num_ifs == 1) {
+		if (opt_bench == BENCH_RXDROP)
+			rx_drop_all();
+		else if (opt_bench == BENCH_TXONLY)
+			tx_only(xsks[0]);
+		else
+			l2fwd(xsks[0]);
+	} else {
+		if (opt_bench == BENCH_RXDROP)
+			rx_drop_all();
+
+	}
 
 	return 0;
 }
