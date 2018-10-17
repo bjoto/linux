@@ -46,6 +46,7 @@ struct xdp_umem {
 	struct xdp_umem_fq_reuse *fq_reuse;
 	u16 queue_id;
 	bool zc;
+	bool inorder_completion;
 	spinlock_t xsk_list_lock;
 	struct list_head xsk_list;
 };

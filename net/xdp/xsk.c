@@ -197,7 +197,8 @@ bool xsk_umem_consume_tx(struct xdp_umem *umem, dma_addr_t *dma, u32 *len)
 		if (!xskq_peek_desc(xs->tx, &desc))
 			continue;
 
-		if (xskq_produce_addr_lazy(umem->cq, desc.addr))
+		if (!umem->inorder_completion &&
+		    xskq_produce_addr_lazy(umem->cq, desc.addr))
 			goto out;
 
 		*dma = xdp_umem_get_dma(umem, desc.addr);
@@ -235,8 +236,7 @@ static void xsk_destruct_skb(struct sk_buff *skb)
 	sock_wfree(skb);
 }
 
-static int xsk_generic_xmit(struct sock *sk, struct msghdr *m,
-			    size_t total_len)
+static int xsk_generic_xmit(struct sock *sk)
 {
 	u32 max_batch = TX_BATCH_SIZE;
 	struct xdp_sock *xs = xdp_sk(sk);
@@ -320,7 +320,7 @@ static int xsk_sendmsg(struct socket *sock, struct msghdr *m, size_t total_len)
 	if (need_wait)
 		return -EOPNOTSUPP;
 
-	return (xs->zc) ? xsk_zc_xmit(sk) : xsk_generic_xmit(sk, m, total_len);
+	return xs->zc ? xsk_zc_xmit(sk) : xsk_generic_xmit(sk);
 }
 
 static unsigned int xsk_poll(struct file *file, struct socket *sock,
@@ -600,7 +600,8 @@ static int xsk_bind(struct socket *sock, struct sockaddr *addr, int addr_len)
 			err = -EBADF;
 			sockfd_put(sock);
 			goto out_unlock;
-		} else if (umem_xs->dev != dev || umem_xs->queue_id != qid) {
+		} else if (umem_xs->dev != dev || umem_xs->queue_id != qid ||
+			   umem_xs->umem->inorder_completion) {
 			err = -EINVAL;
 			sockfd_put(sock);
 			goto out_unlock;
@@ -719,6 +720,24 @@ static int xsk_setsockopt(struct socket *sock, int level, int optname,
 		err = xsk_init_queue(entries, q, true);
 		mutex_unlock(&xs->mutex);
 		return err;
+	}
+	case XDP_INORDER_COMPLETION:
+	{
+		u64 flags;
+
+		/* Flags there for possible future extensions. */
+		if (copy_from_user(&flags, optval, sizeof(flags)))
+			return -EFAULT;
+
+		mutex_lock(&xs->mutex);
+		if (!xs->umem) {
+			mutex_unlock(&xs->mutex);
+			return -EINVAL;
+		}
+
+		xs->umem->inorder_completion = true;
+		mutex_unlock(&xs->mutex);
+		return 0;
 	}
 	default:
 		break;
