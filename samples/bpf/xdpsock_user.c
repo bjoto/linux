@@ -49,7 +49,7 @@
 #define FRAME_SHIFT 11
 #define FRAME_SIZE 2048
 #define NUM_DESCS 1024 * 2
-#define BATCH_SIZE 64
+#define BATCH_SIZE 64 * 2
 
 #define FQ_NUM_DESCS 1024 * 2
 #define CQ_NUM_DESCS 1024 * 2
@@ -818,7 +818,9 @@ static inline void complete_tx_only(struct xdpsock *xsk)
 	if (!xsk->outstanding_tx)
 		return;
 
-	kick_tx(xsk->sfd);
+	if (!opt_poll)
+		kick_tx(xsk->sfd);
+
 	if (opt_inorder_completion) {
 		rcvd = umem_nb_avail_raw(&xsk->umem->cq) - xsk->tx_npkts;
 
@@ -869,7 +871,7 @@ static void rx_drop_all(void)
 	for (i = 0; i < num_socks; i++) {
 		fds[i].fd = xsks[i]->sfd;
 		fds[i].events = POLLIN;
-		timeout = 1000; /* 1sn */
+		timeout = 0; /* 1sn */
 	}
 
 	for (;;) {
@@ -909,7 +911,7 @@ static void tx_only_all(void)
 	for (i = 0; i < num_socks; i++) {
 		fds[i].fd = xsks[i]->sfd;
 		fds[i].events = POLLOUT;
-		timeout = 1000; /* 1sn */
+		timeout = 0; /* 1sn */
 	}
 
 	for (;;) {
