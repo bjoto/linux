@@ -856,35 +856,41 @@ static void rx_drop_all(void)
 
 static void tx_only(struct xdpsock *xsk)
 {
-	int timeout, ret, nfds = 1;
-	struct pollfd fds[nfds + 1];
 	unsigned int idx = 0;
 
+	if (xq_nb_free(&xsk->tx, BATCH_SIZE) >= BATCH_SIZE) {
+		lassert(xq_enq_tx_only(&xsk->tx, idx, BATCH_SIZE) == 0);
+
+		xsk->outstanding_tx += BATCH_SIZE;
+		idx += BATCH_SIZE;
+		idx %= NUM_FRAMES;
+	}
+
+	complete_tx_only(xsk);
+}
+
+static void tx_only_all(void)
+{
+	struct pollfd fds[MAX_SOCKS + 1];
+	int i, ret, timeout, nfds = 1;
+
 	memset(fds, 0, sizeof(fds));
-	fds[0].fd = xsk->sfd;
-	fds[0].events = POLLOUT;
-	timeout = 1000; /* 1sn */
+
+	for (i = 0; i < num_socks; i++) {
+		fds[i].fd = xsks[i]->sfd;
+		fds[i].events = POLLOUT;
+		timeout = 1000; /* 1sn */
+	}
 
 	for (;;) {
 		if (opt_poll) {
 			ret = poll(fds, nfds, timeout);
 			if (ret <= 0)
 				continue;
-
-			if (fds[0].fd != xsk->sfd ||
-			    !(fds[0].revents & POLLOUT))
-				continue;
 		}
 
-		if (xq_nb_free(&xsk->tx, BATCH_SIZE) >= BATCH_SIZE) {
-			lassert(xq_enq_tx_only(&xsk->tx, idx, BATCH_SIZE) == 0);
-
-			xsk->outstanding_tx += BATCH_SIZE;
-			idx += BATCH_SIZE;
-			idx %= NUM_FRAMES;
-		}
-
-		complete_tx_only(xsk);
+		for (i = 0; i < num_socks; i++)
+			tx_only(xsks[i]);
 	}
 }
 
@@ -1027,18 +1033,12 @@ int main(int argc, char **argv)
 
 	prev_time = get_nsecs();
 
-	if (num_ifs == 1) {
-		if (opt_bench == BENCH_RXDROP)
-			rx_drop_all();
-		else if (opt_bench == BENCH_TXONLY)
-			tx_only(xsks[0]);
-		else
-			l2fwd(xsks[0]);
-	} else {
-		if (opt_bench == BENCH_RXDROP)
-			rx_drop_all();
-
-	}
+	if (opt_bench == BENCH_RXDROP)
+		rx_drop_all();
+	else if (opt_bench == BENCH_TXONLY)
+		tx_only_all();
+	else
+		l2fwd(xsks[0]);
 
 	return 0;
 }
