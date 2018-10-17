@@ -49,6 +49,7 @@ struct xdp_umem {
 	bool inorder_completion;
 	spinlock_t xsk_list_lock;
 	struct list_head xsk_list;
+	unsigned int napi_id;
 };
 
 struct xdp_sock {

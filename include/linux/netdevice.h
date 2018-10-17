@@ -349,6 +349,7 @@ enum {
 	NAPI_STATE_HASHED,	/* In NAPI hash (busy polling possible) */
 	NAPI_STATE_NO_BUSY_POLL,/* Do not add in napi_hash, no busy polling */
 	NAPI_STATE_IN_BUSY_POLL,/* sk_busy_loop() owns this NAPI */
+	NAPI_STATE_NO_INT,	/* Don't enable interrupt */
 };
 
 enum {
@@ -359,6 +360,7 @@ enum {
 	NAPIF_STATE_HASHED	 = BIT(NAPI_STATE_HASHED),
 	NAPIF_STATE_NO_BUSY_POLL = BIT(NAPI_STATE_NO_BUSY_POLL),
 	NAPIF_STATE_IN_BUSY_POLL = BIT(NAPI_STATE_IN_BUSY_POLL),
+	NAPIF_STATE_NO_INT	 = BIT(NAPI_STATE_NO_INT),
 };
 
 enum gro_result {

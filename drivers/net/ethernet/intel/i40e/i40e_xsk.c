@@ -4,6 +4,7 @@
 #include <linux/bpf_trace.h>
 #include <net/xdp_sock.h>
 #include <net/xdp.h>
+#include <net/busy_poll.h>
 
 #include "i40e.h"
 #include "i40e_txrx_common.h"
@@ -955,7 +956,8 @@ int i40e_xsk_async_xmit(struct net_device *dev, u32 queue_id)
 	 * honored.
 	 */
 	if (!napi_if_scheduled_mark_missed(&ring->q_vector->napi))
-		i40e_force_wb(vsi, ring->q_vector);
+		if (!(ring->xsk_umem && net_busy_loop_on()))
+			i40e_force_wb(vsi, ring->q_vector);
 
 	return 0;
 }

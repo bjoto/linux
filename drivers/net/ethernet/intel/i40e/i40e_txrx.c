@@ -2572,6 +2572,7 @@ int i40e_napi_poll(struct napi_struct *napi, int budget)
 	struct i40e_q_vector *q_vector =
 			       container_of(napi, struct i40e_q_vector, napi);
 	struct i40e_vsi *vsi = q_vector->vsi;
+	bool napi_bp_no_int = false;
 	struct i40e_ring *ring;
 	bool clean_complete = true;
 	bool arm_wb = false;
@@ -2580,6 +2581,14 @@ int i40e_napi_poll(struct napi_struct *napi, int budget)
 
 	if (test_bit(__I40E_VSI_DOWN, vsi->state)) {
 		napi_complete(napi);
+		return 0;
+	}
+
+	if (net_busy_loop_on() && test_bit(NAPI_STATE_NO_INT, &napi->state))
+		napi_bp_no_int = true;
+
+	if (napi_bp_no_int && budget == 64) {
+		napi_complete_done(napi, work_done);
 		return 0;
 	}
 
@@ -2634,8 +2643,10 @@ int i40e_napi_poll(struct napi_struct *napi, int budget)
 			/* Tell napi that we are done polling */
 			napi_complete_done(napi, work_done);
 
-			/* Force an interrupt */
-			i40e_force_wb(vsi, q_vector);
+			if (!napi_bp_no_int) {
+				/* Force an interrupt */
+				i40e_force_wb(vsi, q_vector);
+			}
 
 			/* Return budget-1 so that polling stops */
 			return budget - 1;
@@ -2654,7 +2665,8 @@ tx_only:
 	/* Work is done so exit the polling mode and re-enable the interrupt */
 	napi_complete_done(napi, work_done);
 
-	i40e_update_enable_itr(vsi, q_vector);
+	if (!napi_bp_no_int)
+		i40e_update_enable_itr(vsi, q_vector);
 
 	return min(work_done, budget - 1);
 }

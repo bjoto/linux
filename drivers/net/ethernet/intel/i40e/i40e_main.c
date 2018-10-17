@@ -3221,9 +3221,15 @@ static int i40e_configure_rx_ring(struct i40e_ring *ring)
 						 &ring->zca);
 		if (ret)
 			return ret;
+
+		/* Record napi_id in xsk_umem for busy polling */
+		ring->xsk_umem->napi_id = ring->q_vector->napi.napi_id;
+		/* Set napi state to not enable interrupt */
+		set_bit(NAPI_STATE_NO_INT, &ring->q_vector->napi.state);
+
 		dev_info(&vsi->back->pdev->dev,
-			 "Registered XDP mem model MEM_TYPE_ZERO_COPY on Rx ring %d\n",
-			 ring->queue_index);
+			 "Registered XDP mem model MEM_TYPE_ZERO_COPY on Rx ring %d napi_id:%d\n",
+			 ring->queue_index, ring->xsk_umem->napi_id);
 
 	} else {
 		ring->rx_buf_len = vsi->rx_buf_len;
@@ -3233,6 +3239,8 @@ static int i40e_configure_rx_ring(struct i40e_ring *ring)
 							 NULL);
 			if (ret)
 				return ret;
+			/* Clear napi state to enable interrupt */
+			clear_bit(NAPI_STATE_NO_INT, &ring->q_vector->napi.state);
 		}
 	}
 

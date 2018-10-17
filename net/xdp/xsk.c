@@ -24,6 +24,7 @@
 #include <linux/rculist.h>
 #include <net/xdp_sock.h>
 #include <net/xdp.h>
+#include <net/busy_poll.h>
 
 #include "xsk_queue.h"
 #include "xdp_umem.h"
@@ -323,12 +324,51 @@ static int xsk_sendmsg(struct socket *sock, struct msghdr *m, size_t total_len)
 	return xs->zc ? xsk_zc_xmit(sk) : xsk_generic_xmit(sk);
 }
 
+static bool xsk_tx_busy_loop_end(void *p, unsigned long start_time)
+{
+	struct xdp_sock *xs = p;
+
+	return (!xskq_full_desc(xs->tx) || busy_loop_timeout(start_time));
+}
+
+static void xsk_tx_busy_loop(struct xdp_sock *xs, int nonblock)
+{
+	unsigned int napi_id = xs->umem->napi_id;
+
+	if ((napi_id >= MIN_NAPI_ID) && net_busy_loop_on())
+		napi_busy_loop(napi_id, nonblock ? NULL : xsk_tx_busy_loop_end,
+			       xs);
+}
+static bool xsk_rx_busy_loop_end(void *p, unsigned long start_time)
+{
+	struct xdp_sock *xs = p;
+
+	return (!xskq_empty_desc(xs->rx) || busy_loop_timeout(start_time));
+}
+
+static void xsk_rx_busy_loop(struct xdp_sock *xs, int nonblock)
+{
+	unsigned int napi_id = xs->umem->napi_id;
+
+	if ((napi_id >= MIN_NAPI_ID) && net_busy_loop_on())
+		napi_busy_loop(napi_id, nonblock ? NULL : xsk_rx_busy_loop_end,
+			       xs);
+}
+
 static unsigned int xsk_poll(struct file *file, struct socket *sock,
 			     struct poll_table_struct *wait)
 {
 	unsigned int mask = datagram_poll(file, sock, wait);
 	struct sock *sk = sock->sk;
 	struct xdp_sock *xs = xdp_sk(sk);
+	__poll_t events = poll_requested_events(wait);
+
+	if (events & POLL_BUSY_LOOP) {
+		if (events & (POLLIN | POLLRDNORM))
+			xsk_rx_busy_loop(xs, false);
+		if (events & (POLLOUT | POLLWRNORM))
+			xsk_tx_busy_loop(xs, false);
+	}
 
 	if (xs->rx && !xskq_empty_desc(xs->rx))
 		mask |= POLLIN | POLLRDNORM;
