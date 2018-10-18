@@ -346,7 +346,7 @@ static bool i40e_alloc_buffer_zc(struct i40e_ring *rx_ring,
 		return true;
 	}
 
-	if (!xsk_umem_peek_addr(umem, &handle)) {
+	if (!xsk_umem_consume_addr(umem, &handle)) {
 		rx_ring->rx_stats.alloc_page_failed++;
 		return false;
 	}
@@ -360,8 +360,6 @@ static bool i40e_alloc_buffer_zc(struct i40e_ring *rx_ring,
 	bi->addr += hr;
 
 	bi->handle = handle + umem->headroom;
-
-	xsk_umem_discard_addr(umem);
 	return true;
 }
 
