@@ -39,9 +39,9 @@ struct xdp_umem {
 	struct pid *pid;
 	unsigned long address;
 	refcount_t users;
+	u32 npgs;
 	struct work_struct work;
 	struct page **pgs;
-	u32 npgs;
 	struct net_device *dev;
 	struct xdp_umem_fq_reuse *fq_reuse;
 	u16 queue_id;
