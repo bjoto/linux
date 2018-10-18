@@ -8,7 +8,6 @@
 
 #include <linux/types.h>
 #include <linux/if_xdp.h>
-#include <net/xdp_sock.h>
 
 #define RX_BATCH_SIZE 16
 #define LAZY_UPDATE_THRESHOLD 128
@@ -119,6 +118,12 @@ static inline u64 *xskq_peek_addr(struct xsk_queue *q, u64 *addr)
 static inline void xskq_discard_addr(struct xsk_queue *q)
 {
 	q->cons_tail++;
+}
+
+static inline void xskq_consume_addr(struct xsk_queue *q, u64 *addr)
+{
+        if (xskq_peek_addr(q, addr))
+		xskq_discard_addr(q);
 }
 
 static inline int xskq_produce_addr(struct xsk_queue *q, u64 addr)
