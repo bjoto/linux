@@ -3396,11 +3396,13 @@ EXPORT_SYMBOL_GPL(xdp_do_redirect);
 int xdp_do_redirect_2(struct net_device *dev, struct xdp_buff *xdp,
 		      struct bpf_prog *xdp_prog, struct bpf_redirect_info *ri)
 {
-	struct bpf_map *map = READ_ONCE(ri->map);
+	struct bpf_map *map;
 
 	if (ri->xsk)
 		return xdp_do_xsk_redirect(dev, xdp, xdp_prog, ri);
-	else if (map)
+
+	map = READ_ONCE(ri->map);
+	if (map)
 		return xdp_do_redirect_map(dev, xdp, xdp_prog, map, ri);
 
 	return xdp_do_redirect_slow(dev, xdp, xdp_prog, ri);
@@ -3535,17 +3537,17 @@ static const struct bpf_func_proto bpf_xdp_redirect_map_proto = {
 	.arg3_type      = ARG_ANYTHING,
 };
 
-int __bpf_xdp_xsk_redirect(struct xdp_buff *xdp)
+int __bpf_xdp_xsk_redirect(struct xdp_buff *xdp, struct xdp_sock *xsk)
 {
 	struct bpf_redirect_info *ri = this_cpu_ptr(&bpf_redirect_info);
 
 	// XXX: keep flags as last arg, e.g to change default return
 	// from XDP_PASS to XDP_DROP?
 
-	if (!xdp->rxq->xsk)
+	if (!xsk)
 		return XDP_PASS;
 
-	ri->xsk = xdp->rxq->xsk;
+	ri->xsk = xsk;
 	return XDP_REDIRECT;
 }
 EXPORT_SYMBOL(__bpf_xdp_xsk_redirect);
@@ -3567,10 +3569,12 @@ EXPORT_SYMBOL(__bpf_xdp_xsk_redirect_2);
 BPF_CALL_2(bpf_xdp_xsk_redirect, struct xdp_buff *, xdp, u64, flags)
 {
 	struct bpf_redirect_info *ri = this_cpu_ptr(&bpf_redirect_info);
+	struct xdp_sock *xsk;
 
+	xsk = xdp->rxq->dev->_rx[xdp->rxq->queue_index].xsk;
 	ri->ifindex = 0;
 	WRITE_ONCE(ri->map, NULL);
-	return __bpf_xdp_xsk_redirect(xdp);
+	return __bpf_xdp_xsk_redirect(xdp, xsk);
 }
 
 static const struct bpf_func_proto bpf_xdp_xsk_redirect_proto = {

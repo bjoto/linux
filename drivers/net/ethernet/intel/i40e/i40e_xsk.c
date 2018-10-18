@@ -287,7 +287,7 @@ int i40e_xsk_umem_setup(struct i40e_vsi *vsi, struct xdp_umem *umem,
  *
  * Returns any of I40E_XDP_{PASS, CONSUMED, TX, REDIR}
  **/
-static int i40e_run_xdp_zc(struct i40e_ring *rx_ring, struct xdp_buff *xdp, struct bpf_redirect_info *ri)
+static int i40e_run_xdp_zc(struct i40e_ring *rx_ring, struct xdp_buff *xdp, struct bpf_redirect_info *ri, struct xdp_sock *xsk)
 {
 	struct i40e_ring *xdp_ring;
 	struct bpf_prog *xdp_prog;
@@ -301,7 +301,7 @@ static int i40e_run_xdp_zc(struct i40e_ring *rx_ring, struct xdp_buff *xdp, stru
 	xdp_prog = READ_ONCE(rx_ring->xdp_prog);
 	//act = bpf_prog_run_xdp(xdp_prog, xdp);
 	if (xdp_prog->xsk_builtin)
-		act = __bpf_xdp_xsk_redirect_2(xdp, ri, xdp->rxq->xsk);
+		act = __bpf_xdp_xsk_redirect_2(xdp, ri, xsk);
 
 	xdp->handle += xdp->data - xdp->data_hard_start;
 	if (likely(act == XDP_REDIRECT)) {
@@ -613,7 +613,7 @@ static void i40e_inc_ntc(struct i40e_ring *rx_ring)
 
 	ntc = (ntc < rx_ring->count) ? ntc : 0;
 	rx_ring->next_to_clean = ntc;
-	prefetch(I40E_RX_DESC(rx_ring, ntc));
+	//prefetch(I40E_RX_DESC(rx_ring, ntc));
 }
 
 /**
@@ -632,24 +632,19 @@ int i40e_clean_rx_irq_zc(struct i40e_ring *rx_ring, int budget)
 	struct sk_buff *skb;
 	struct xdp_buff xdp;
 	struct bpf_redirect_info ri = {};
+	struct xdp_sock *xsk;
+	int i = budget;
 
 	xdp.rxq = &rx_ring->xdp_rxq;
-	rx_ring->xdp_rxq.xsk = rx_ring->netdev->_rx[rx_ring->queue_index].xsk;
+	xsk = rx_ring->netdev->_rx[rx_ring->xdp_rxq.queue_index].xsk;
 
-	while (likely(total_rx_packets < (unsigned int)budget)) {
+	while (i--) {
 		struct i40e_rx_buffer *bi;
 		union i40e_rx_desc *rx_desc;
 		unsigned int size;
 		u16 vlan_tag;
 		u8 rx_ptype;
 		u64 qword;
-
-		if (cleaned_count >= I40E_RX_BUFFER_WRITE) {
-			failure = failure ||
-				  !i40e_alloc_rx_buffers_fast_zc(rx_ring,
-								 cleaned_count);
-			cleaned_count = 0;
-		}
 
 		rx_desc = I40E_RX_DESC(rx_ring, rx_ring->next_to_clean);
 		qword = le64_to_cpu(rx_desc->wb.qword1.status_error_len);
@@ -682,7 +677,7 @@ int i40e_clean_rx_irq_zc(struct i40e_ring *rx_ring, int budget)
 		xdp.data_end = xdp.data + size;
 		xdp.handle = bi->handle;
 
-		xdp_res = i40e_run_xdp_zc(rx_ring, &xdp, &ri);
+		xdp_res = i40e_run_xdp_zc(rx_ring, &xdp, &ri, xsk);
 		if (xdp_res) {
 			if (xdp_res & (I40E_XDP_TX | I40E_XDP_REDIR)) {
 				xdp_xmit |= xdp_res;
@@ -731,7 +726,12 @@ int i40e_clean_rx_irq_zc(struct i40e_ring *rx_ring, int budget)
 		i40e_receive_skb(rx_ring, skb, vlan_tag);
 	}
 
-	rx_ring->xdp_rxq.xsk = NULL;
+	if (cleaned_count >= I40E_RX_BUFFER_WRITE) {
+		failure = failure ||
+			  !i40e_alloc_rx_buffers_fast_zc(rx_ring,
+							 cleaned_count);
+	}
+
 
 	if (xdp_xmit & I40E_XDP_REDIR)
 		xdp_do_flush_map_2(&ri);

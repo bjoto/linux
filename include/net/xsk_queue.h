@@ -74,6 +74,18 @@ static inline u32 xskq_nb_free(struct xsk_queue *q, u32 producer, u32 dcnt)
 	return q->nentries - (producer - q->cons_tail);
 }
 
+static inline bool xskq_space_for_one(struct xsk_queue *q, u32 producer)
+{
+	u32 free_entries = q->nentries - (producer - q->cons_tail);
+
+	if (free_entries)
+		return true;
+
+	/* Refresh the local tail pointer */
+	q->cons_tail = READ_ONCE(q->ring->consumer);
+	return !!(q->nentries - (producer - q->cons_tail));
+}
+
 /* UMEM queue */
 
 static inline bool xskq_is_valid_addr(struct xsk_queue *q, u64 addr)
@@ -234,7 +246,7 @@ static inline int xskq_produce_batch_desc(struct xsk_queue *q,
 	struct xdp_rxtx_ring *ring = (struct xdp_rxtx_ring *)q->ring;
 	unsigned int idx;
 
-	if (xskq_nb_free(q, q->prod_head, 1) == 0)
+	if (unlikely(!xskq_space_for_one(q, q->prod_head)))
 		return -ENOSPC;
 
 	idx = (q->prod_head++) & q->ring_mask;

@@ -619,13 +619,17 @@ static inline u32 bpf_prog_run_clear_cb(const struct bpf_prog *prog,
 	return BPF_PROG_RUN(prog, skb);
 }
 
-int __bpf_xdp_xsk_redirect(struct xdp_buff *xdp);
+int __bpf_xdp_xsk_redirect(struct xdp_buff *xdp, struct xdp_sock *xsk);
 
 static __always_inline u32 bpf_prog_run_xdp(const struct bpf_prog *prog,
 					    struct xdp_buff *xdp)
 {
-	if (prog->xsk_builtin)
-		return __bpf_xdp_xsk_redirect(xdp);
+	if (prog->xsk_builtin) {
+		struct xdp_sock *xsk;
+
+		xsk = xdp->rxq->dev->_rx[xdp->rxq->queue_index].xsk;
+		return __bpf_xdp_xsk_redirect(xdp, xsk);
+	}
 
 	/* Caller needs to hold rcu_read_lock() (!), otherwise program
 	 * can be released while still running, or map elements could be

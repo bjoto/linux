@@ -61,7 +61,6 @@ struct xdp_rxq_info {
 	u32 queue_index;
 	u32 reg_state;
 	struct xdp_mem_info mem;
-	struct xdp_sock *xsk;
 } ____cacheline_aligned; /* perf critical, avoid false-sharing */
 
 struct xdp_buff {

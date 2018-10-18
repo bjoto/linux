@@ -184,6 +184,7 @@ HOSTCFLAGS_trace_event_user.o += -I$(srctree)/tools/lib/bpf/
 HOSTCFLAGS_sampleip_user.o += -I$(srctree)/tools/lib/bpf/
 HOSTCFLAGS_task_fd_query_user.o += -I$(srctree)/tools/lib/bpf/
 HOSTCFLAGS_xdp_sample_pkts_user.o += -I$(srctree)/tools/lib/bpf/
+HOSTCFLAGS_xdpsock_user.o += -g3 #-mno-sse -mno-mmx -mno-sse2 -mno-3dnow -mno-avx
 
 KBUILD_HOSTLDLIBS		+= $(LIBBPF) -lelf
 HOSTLDLIBS_tracex4		+= -lrt

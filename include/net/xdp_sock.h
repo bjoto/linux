@@ -78,7 +78,6 @@ struct xdp_buff;
 int xsk_generic_rcv(struct xdp_sock *xs, struct xdp_buff *xdp);
 int xsk_attached_rcv(struct xdp_sock *xs, struct xdp_buff *xdp);
 int xsk_rcv(struct xdp_sock *xs, struct xdp_buff *xdp);
-void xsk_flush(struct xdp_sock *xs);
 bool xsk_is_setup_for_bpf_map(struct xdp_sock *xs);
 /* Used from netdev driver */
 u64 *xsk_umem_peek_addr(struct xdp_umem *umem, u64 *addr);
@@ -135,6 +134,27 @@ static inline bool xsk_umem_consume_addr(struct xdp_umem *umem, u64 *addr)
 {
 	return xskq_consume_addr(umem->fq, addr);
 }
+
+static inline void xsk_sock_def_readable(struct sock *sk)
+{
+	struct socket_wq *wq;
+
+	rcu_read_lock();
+	wq = rcu_dereference(sk->sk_wq);
+	if (skwq_has_sleeper(wq))
+		wake_up_interruptible_sync_poll(&wq->wait, EPOLLIN | EPOLLPRI |
+						EPOLLRDNORM | EPOLLRDBAND);
+	sk_wake_async(sk, SOCK_WAKE_WAITD, POLL_IN);
+	rcu_read_unlock();
+}
+
+static inline void xsk_flush(struct xdp_sock *xs)
+{
+	xskq_produce_flush_desc(xs->rx);
+	xsk_sock_def_readable(&xs->sk);
+	//xs->sk.sk_data_ready(&xs->sk);
+}
+
 #else
 static inline int xsk_generic_rcv(struct xdp_sock *xs, struct xdp_buff *xdp)
 {
