@@ -15,7 +15,7 @@
 #include <linux/rtnetlink.h>
 
 #include "xdp_umem.h"
-#include "xsk_queue.h"
+#include <net/xsk_queue.h>
 
 #define XDP_UMEM_MIN_CHUNK_SIZE 2048
 

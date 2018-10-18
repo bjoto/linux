@@ -8,7 +8,7 @@
 #include <linux/overflow.h>
 #include <net/xdp_sock.h>
 
-#include "xsk_queue.h"
+#include <net/xsk_queue.h>
 
 void xskq_set_umem(struct xsk_queue *q, u64 size, u64 chunk_mask)
 {

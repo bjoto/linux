@@ -26,7 +26,7 @@
 #include <net/xdp.h>
 #include <net/busy_poll.h>
 
-#include "xsk_queue.h"
+#include <net/xsk_queue.h>
 #include "xdp_umem.h"
 
 #define TX_BATCH_SIZE 16
