@@ -12,6 +12,7 @@
 #include <linux/spinlock.h>
 #include <linux/mm.h>
 #include <net/sock.h>
+#include <net/xsk_queue.h>
 
 struct net_device;
 struct xsk_queue;
@@ -128,6 +129,11 @@ static inline void xsk_umem_fq_reuse(struct xdp_umem *umem, u64 addr)
 	struct xdp_umem_fq_reuse *rq = umem->fq_reuse;
 
 	rq->handles[rq->length++] = addr;
+}
+
+static inline bool xsk_umem_consume_addr(struct xdp_umem *umem, u64 *addr)
+{
+	return xskq_consume_addr(umem->fq, addr);
 }
 #else
 static inline int xsk_generic_rcv(struct xdp_sock *xs, struct xdp_buff *xdp)

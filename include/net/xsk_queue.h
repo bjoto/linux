@@ -120,10 +120,14 @@ static inline void xskq_discard_addr(struct xsk_queue *q)
 	q->cons_tail++;
 }
 
-static inline void xskq_consume_addr(struct xsk_queue *q, u64 *addr)
+static inline bool xskq_consume_addr(struct xsk_queue *q, u64 *addr)
 {
-        if (xskq_peek_addr(q, addr))
+        if (xskq_peek_addr(q, addr)) {
 		xskq_discard_addr(q);
+		return true;
+	}
+
+	return false;
 }
 
 static inline int xskq_produce_addr(struct xsk_queue *q, u64 addr)
