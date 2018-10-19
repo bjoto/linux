@@ -927,32 +927,53 @@ static void tx_only_all(void)
 
 static void l2fwd(struct xdpsock *xsk)
 {
+	struct xdp_desc descs[BATCH_SIZE];
+	unsigned int rcvd, i;
+	int ret;
+
+	complete_tx_l2fwd(xsk);
+
+	rcvd = xq_deq(&xsk->rx, descs, BATCH_SIZE);
+	if (!rcvd)
+		return;
+
+	for (i = 0; i < rcvd; i++) {
+		char *pkt = xq_get_data(xsk, descs[i].addr);
+
+		swap_mac_addresses(pkt);
+
+		hex_dump(pkt, descs[i].len, descs[i].addr);
+	}
+
+	xsk->rx_npkts += rcvd;
+
+	ret = xq_enq(&xsk->tx, descs, rcvd);
+	lassert(ret == 0);
+	xsk->outstanding_tx += rcvd;
+}
+
+static void l2fwd_all(void)
+{
+	struct pollfd fds[MAX_SOCKS];
+	int i, ret, timeout;
+
+	memset(fds, 0, sizeof(fds));
+
+	for (i = 0; i < num_socks; i++) {
+		fds[i].fd = xsks[i]->sfd;
+		fds[i].events = POLLOUT | POLLIN;
+		timeout = 0; /* 1sn */
+	}
+
 	for (;;) {
-		struct xdp_desc descs[BATCH_SIZE];
-		unsigned int rcvd, i;
-		int ret;
-
-		for (;;) {
-			complete_tx_l2fwd(xsk);
-
-			rcvd = xq_deq(&xsk->rx, descs, BATCH_SIZE);
-			if (rcvd > 0)
-				break;
+		if (opt_poll) {
+			ret = poll(fds, num_socks, timeout);
+			if (ret <= 0)
+				continue;
 		}
 
-		for (i = 0; i < rcvd; i++) {
-			char *pkt = xq_get_data(xsk, descs[i].addr);
-
-			swap_mac_addresses(pkt);
-
-			hex_dump(pkt, descs[i].len, descs[i].addr);
-		}
-
-		xsk->rx_npkts += rcvd;
-
-		ret = xq_enq(&xsk->tx, descs, rcvd);
-		lassert(ret == 0);
-		xsk->outstanding_tx += rcvd;
+		for (i = 0; i < num_socks; i++)
+			l2fwd(xsks[i]);
 	}
 }
 
@@ -1069,7 +1090,7 @@ int main(int argc, char **argv)
 	else if (opt_bench == BENCH_TXONLY)
 		tx_only_all();
 	else
-		l2fwd(xsks[0]);
+		l2fwd_all();
 
 	return 0;
 }
