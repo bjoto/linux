@@ -350,37 +350,19 @@ enum i40e_ring_state_t {
 
 /* struct that defines a descriptor ring, associated with a VSI */
 struct i40e_ring {
+	struct i40e_ring *next;		/* pointer to next ring in q_vector */
 	void *desc;			/* Descriptor ring memory */
+	struct device *dev;		/* Used for DMA mapping */
+	struct net_device *netdev;	/* netdev ring maps to */
 	struct bpf_prog *xdp_prog;
 	union {
 		struct i40e_tx_buffer *tx_bi;
 		struct i40e_rx_buffer *rx_bi;
 	};
-	/* used in interrupt processing */
-	u16 next_to_use;
-	u16 next_to_clean;
-	u16 count;			/* Number of descriptors */
-	u16 next_to_alloc;
-	u8 __iomem *tail;
-
-	struct net_device *netdev;	/* netdev ring maps to */
-	struct i40e_ring *next;		/* pointer to next ring in q_vector */
-	struct xdp_umem *xsk_umem;
-	struct xdp_rxq_info xdp_rxq;
-
-	/* stats structs */
-	struct i40e_queue_stats	stats;
-	struct u64_stats_sync syncp;
-	union {
-		struct i40e_tx_queue_stats tx_stats;
-		struct i40e_rx_queue_stats rx_stats;
-	};
-
-	struct i40e_q_vector *q_vector;	/* Backreference to associated vector */
-	struct device *dev;		/* Used for DMA mapping */
 	DECLARE_BITMAP(state, __I40E_RING_STATE_NBITS);
 	u16 queue_index;		/* Queue number of ring */
 	u8 dcb_tc;			/* Traffic class of ring */
+	u8 __iomem *tail;
 	u16 idx;
 
 	/* high bit set means dynamic, use accessor routines to read/write.
@@ -390,9 +372,13 @@ struct i40e_ring {
 	 */
 	u16 itr_setting;
 
+	u16 count;			/* Number of descriptors */
 	u16 reg_idx;			/* HW register index of the ring */
 	u16 rx_buf_len;
 
+	/* used in interrupt processing */
+	u16 next_to_use;
+	u16 next_to_clean;
 
 	u8 atr_sample_rate;
 	u8 atr_count;
@@ -406,12 +392,22 @@ struct i40e_ring {
 #define I40E_RXR_FLAGS_BUILD_SKB_ENABLED	BIT(1)
 #define I40E_TXR_FLAGS_XDP			BIT(2)
 
+	/* stats structs */
+	struct i40e_queue_stats	stats;
+	struct u64_stats_sync syncp;
+	union {
+		struct i40e_tx_queue_stats tx_stats;
+		struct i40e_rx_queue_stats rx_stats;
+	};
+
 	unsigned int size;		/* length of descriptor ring in bytes */
 	dma_addr_t dma;			/* physical address of ring */
 
 	struct i40e_vsi *vsi;		/* Backreference to associated VSI */
+	struct i40e_q_vector *q_vector;	/* Backreference to associated vector */
 
 	struct rcu_head rcu;		/* to avoid race on free */
+	u16 next_to_alloc;
 	struct sk_buff *skb;		/* When i40e_clean_rx_ring_irq() must
 					 * return before it sees the EOP for
 					 * the current packet, we save that skb
@@ -422,6 +418,8 @@ struct i40e_ring {
 					 */
 
 	struct i40e_channel *ch;
+	struct xdp_rxq_info xdp_rxq;
+	struct xdp_umem *xsk_umem;
 	struct zero_copy_allocator zca; /* ZC allocator anchor */
 } ____cacheline_internodealigned_in_smp;
 
