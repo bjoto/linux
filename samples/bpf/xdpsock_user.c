@@ -799,7 +799,8 @@ static inline void complete_tx_l2fwd(struct xdpsock *xsk)
 	if (!xsk->outstanding_tx)
 		return;
 
-	kick_tx(xsk->sfd);
+	if (!opt_poll)
+		kick_tx(xsk->sfd);
 	ndescs = (xsk->outstanding_tx > BATCH_SIZE) ? BATCH_SIZE :
 		 xsk->outstanding_tx;
 
