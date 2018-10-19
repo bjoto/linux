@@ -299,14 +299,16 @@ static int i40e_run_xdp_zc(struct i40e_ring *rx_ring, struct xdp_buff *xdp, stru
 	 * this path is enabled by setting an XDP program.
 	 */
 	xdp_prog = READ_ONCE(rx_ring->xdp_prog);
-	act = bpf_prog_run_xdp(xdp_prog, xdp);
-	//if (xdp_prog->xsk_builtin)
-	//	act = __bpf_xdp_xsk_redirect_2(xdp, ri, xsk);
+	//act = bpf_prog_run_xdp(xdp_prog, xdp);
+	if (xdp_prog->xsk_builtin)
+		act = __bpf_xdp_xsk_redirect_2(xdp, ri, xsk);
+	else
+		act = bpf_prog_run_xdp(xdp_prog, xdp);
 
 	xdp->handle += xdp->data - xdp->data_hard_start;
 	if (likely(act == XDP_REDIRECT)) {
-		//err = xdp_do_redirect_2(rx_ring->netdev, xdp, xdp_prog, ri);
-		err = xdp_do_redirect(rx_ring->netdev, xdp, xdp_prog);
+		err = xdp_do_redirect_2(rx_ring->netdev, xdp, xdp_prog, ri);
+		//err = xdp_do_redirect(rx_ring->netdev, xdp, xdp_prog);
 		result = !err ? I40E_XDP_REDIR : I40E_XDP_CONSUMED;
 	} else if(act == XDP_TX) {
 		xdp_ring = rx_ring->vsi->xdp_rings[rx_ring->queue_index];
@@ -735,8 +737,8 @@ int i40e_clean_rx_irq_zc(struct i40e_ring *rx_ring, int budget)
 
 
 	if (xdp_xmit & I40E_XDP_REDIR)
-		//xdp_do_flush_map_2(&ri);
-		xdp_do_flush_map();
+		xdp_do_flush_map_2(&ri);
+		//xdp_do_flush_map();
 
 	if (xdp_xmit & I40E_XDP_TX) {
 		struct i40e_ring *xdp_ring =
