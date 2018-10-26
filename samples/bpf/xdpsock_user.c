@@ -122,6 +122,7 @@ struct xdpsock {
 	const char *ifs;
 	int ifindex;
 	int tx_idx;
+	struct xdp_statistics stats;
 };
 
 static int num_socks;
@@ -621,6 +622,12 @@ static void dump_stats(void)
 	for (i = 0; i < num_socks && xsks[i]; i++) {
 		char *fmt = "%-15s %'-11.0f %'-11lu\n";
 		double rx_pps, tx_pps;
+		struct xdp_statistics stats;
+		size_t stats_size = sizeof(stats);
+		int err;
+
+		err = getsockopt(xsks[i]->sfd, SOL_XDP, XDP_STATISTICS, &stats, &stats_size);
+		lassert(err == 0);
 
 		rx_pps = (xsks[i]->rx_npkts - xsks[i]->prev_rx_npkts) *
 			 1000000000. / dt;
@@ -636,8 +643,19 @@ static void dump_stats(void)
 		printf(fmt, "rx", rx_pps, xsks[i]->rx_npkts);
 		printf(fmt, "tx", tx_pps, xsks[i]->tx_npkts);
 
+		printf("rx_dropped: %llu rx_invalid_descs: %llu tx_invalid_descs: %llu\n",
+		       stats.rx_dropped,
+		       stats.rx_invalid_descs,
+		       stats.tx_invalid_descs);
+#if 0
+		printf("rx_dropped: %llu rx_invalid_descs: %llu tx_invalid_descs: %llu\n",
+		       xsks[i]->stats.rx_dropped - stats.rx_dropped,
+		       xsks[i]->stats.rx_invalid_descs - stats.rx_invalid_descs,
+#endif		       xsks[i]->stats.tx_invalid_descs - stats.tx_invalid_descs);
+
 		xsks[i]->prev_rx_npkts = xsks[i]->rx_npkts;
 		xsks[i]->prev_tx_npkts = xsks[i]->tx_npkts;
+		//xsks[i]->stats = stats;
 	}
 }
 
