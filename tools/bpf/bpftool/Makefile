@@ -35,7 +35,7 @@ $(LIBBPF)-clean:
 prefix ?= /usr/local
 bash_compdir ?= /usr/share/bash-completion/completions
 
-CC = gcc
+CC = $(CROSS_COMPILE)gcc
 
 CFLAGS += -O2
 CFLAGS += -W -Wall -Wextra -Wno-unused-parameter -Wshadow -Wno-missing-field-initializers
