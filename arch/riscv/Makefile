@@ -79,6 +79,10 @@ head-y := arch/riscv/kernel/head.o
 
 core-y += arch/riscv/kernel/ arch/riscv/mm/
 
+ifeq ($(CONFIG_ARCH_RV64I),y)
+core-y += arch/riscv/net/
+endif
+
 libs-y += arch/riscv/lib/
 
 PHONY += vdso_install
