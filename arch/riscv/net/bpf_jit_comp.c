@@ -333,7 +333,7 @@ static u32 rv_sraiw(u8 rd, u8 rs1, u16 imm11_0)
 
 static u32 rv_srai(u8 rd, u8 rs1, u16 imm11_0)
 {
-	return rv_i_insn(0x400 | imm11_0, rs1, 5, rd, 0x1b);
+	return rv_i_insn(0x400 | imm11_0, rs1, 5, rd, 0x13);
 }
 
 #if 0
