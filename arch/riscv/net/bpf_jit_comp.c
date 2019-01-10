@@ -1316,6 +1316,8 @@ static void build_epilogue(struct rv_jit_context *ctx)
 	}
 
 	emit(rv_addi(RV_REG_SP, RV_REG_SP, stack_adjust), ctx);
+	/* Set return value. */
+	emit(rv_addi(RV_REG_A0, RV_REG_A5, 0), ctx);
 	emit(rv_jalr(RV_REG_ZERO, RV_REG_RA, 0), ctx);
 }
 
