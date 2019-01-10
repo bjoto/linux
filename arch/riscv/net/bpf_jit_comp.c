@@ -1315,6 +1315,7 @@ static void build_epilogue(struct rv_jit_context *ctx)
 		store_offset -= 8;
 	}
 
+	emit(rv_addi(RV_REG_SP, RV_REG_SP, stack_adjust), ctx);
 	emit(rv_jalr(RV_REG_ZERO, RV_REG_RA, 0), ctx);
 }
 
