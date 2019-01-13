@@ -536,6 +536,10 @@ static int emit_insn(const struct bpf_insn *insn, struct rv_jit_context *ctx,
 		rs = bpf_to_rv_reg(insn->src_reg, ctx);
 		rd = bpf_to_rv_reg(insn->dst_reg, ctx);
 		emit(is64 ? rv_addi(rd, rs, 0) : rv_addiw(rd, rs, 0), ctx);
+		if (!is64) {
+			emit(rv_slli(rd, rd, 32), ctx);
+			emit(rv_srli(rd, rd, 32), ctx);
+		}
 		break;
 
 	/* dst = dst OP src */
@@ -681,6 +685,10 @@ static int emit_insn(const struct bpf_insn *insn, struct rv_jit_context *ctx,
 	case BPF_ALU64 | BPF_MOV | BPF_K:
 		rd = bpf_to_rv_reg(insn->dst_reg, ctx);
 		emit_imm(rd, imm, ctx); // XXX: use w opcodes?
+		if (!is64) {
+			emit(rv_slli(rd, rd, 32), ctx);
+			emit(rv_srli(rd, rd, 32), ctx);
+		}
 		break;
 
 	/* dst = dst OP imm */
