@@ -618,9 +618,63 @@ static int emit_insn(const struct bpf_insn *insn, struct rv_jit_context *ctx,
 
 	/* dst = BSWAP##imm(dst) */
 	case BPF_ALU | BPF_END | BPF_FROM_LE:
+	{
+		int shift = 64 - imm;
+
+		rd = bpf_to_rv_reg(insn->dst_reg, ctx);
+		emit(rv_slli(rd, rd, shift), ctx);
+		emit(rv_srli(rd, rd, shift), ctx);
+		break;
+	}
 	case BPF_ALU | BPF_END | BPF_FROM_BE:
-		pr_err("bpf-jit: from_le/be not supported yet!\n");
-		return -1;
+		rd = bpf_to_rv_reg(insn->dst_reg, ctx);
+
+		emit(rv_addi(RV_REG_T2, RV_REG_ZERO, 0), ctx);
+
+		emit(rv_andi(RV_REG_T1, rd, 0xff), ctx);
+		emit(rv_add(RV_REG_T2, RV_REG_T2, RV_REG_T1), ctx);
+		emit(rv_slli(RV_REG_T2, RV_REG_T2, 8), ctx);
+		emit(rv_srli(rd, rd, 8), ctx);
+		if (imm == 16)
+			goto out_be;
+
+		emit(rv_andi(RV_REG_T1, rd, 0xff), ctx);
+		emit(rv_add(RV_REG_T2, RV_REG_T2, RV_REG_T1), ctx);
+		emit(rv_slli(RV_REG_T2, RV_REG_T2, 8), ctx);
+		emit(rv_srli(rd, rd, 8), ctx);
+
+		emit(rv_andi(RV_REG_T1, rd, 0xff), ctx);
+		emit(rv_add(RV_REG_T2, RV_REG_T2, RV_REG_T1), ctx);
+		emit(rv_slli(RV_REG_T2, RV_REG_T2, 8), ctx);
+		emit(rv_srli(rd, rd, 8), ctx);
+		if (imm == 32)
+			goto out_be;
+
+		emit(rv_andi(RV_REG_T1, rd, 0xff), ctx);
+		emit(rv_add(RV_REG_T2, RV_REG_T2, RV_REG_T1), ctx);
+		emit(rv_slli(RV_REG_T2, RV_REG_T2, 8), ctx);
+		emit(rv_srli(rd, rd, 8), ctx);
+
+		emit(rv_andi(RV_REG_T1, rd, 0xff), ctx);
+		emit(rv_add(RV_REG_T2, RV_REG_T2, RV_REG_T1), ctx);
+		emit(rv_slli(RV_REG_T2, RV_REG_T2, 8), ctx);
+		emit(rv_srli(rd, rd, 8), ctx);
+
+		emit(rv_andi(RV_REG_T1, rd, 0xff), ctx);
+		emit(rv_add(RV_REG_T2, RV_REG_T2, RV_REG_T1), ctx);
+		emit(rv_slli(RV_REG_T2, RV_REG_T2, 8), ctx);
+		emit(rv_srli(rd, rd, 8), ctx);
+
+		emit(rv_andi(RV_REG_T1, rd, 0xff), ctx);
+		emit(rv_add(RV_REG_T2, RV_REG_T2, RV_REG_T1), ctx);
+		emit(rv_slli(RV_REG_T2, RV_REG_T2, 8), ctx);
+		emit(rv_srli(rd, rd, 8), ctx);
+	out_be:
+		emit(rv_andi(RV_REG_T1, rd, 0xff), ctx);
+		emit(rv_add(RV_REG_T2, RV_REG_T2, RV_REG_T1), ctx);
+
+		emit(rv_addi(rd, RV_REG_T2, 0), ctx);
+		break;
 
 	/* dst = imm */
 	case BPF_ALU | BPF_MOV | BPF_K:
