@@ -403,41 +403,41 @@ static u32 rv_sd(u8 rs1, u16 imm11_0, u8 rs2)
 	return rv_s_insn(imm11_0, rs2, rs1, 3, 0x23);
 }
 
+#if 0
 static u32 rv_lb(u8 rd, u16 imm11_0, u8 rs1)
 {
 	return rv_i_insn(imm11_0, rs1, 0, rd, 0x03);
 }
+#endif
 
-#if 0
 static u32 rv_lbu(u8 rd, u16 imm11_0, u8 rs1)
 {
 	return rv_i_insn(imm11_0, rs1, 4, rd, 0x03);
 }
-#endif
 
+#if 0
 static u32 rv_lh(u8 rd, u16 imm11_0, u8 rs1)
 {
 	return rv_i_insn(imm11_0, rs1, 1, rd, 0x03);
 }
+#endif
 
-#if 0
 static u32 rv_lhu(u8 rd, u16 imm11_0, u8 rs1)
 {
 	return rv_i_insn(imm11_0, rs1, 5, rd, 0x03);
 }
-#endif
 
+#if 0
 static u32 rv_lw(u8 rd, u16 imm11_0, u8 rs1)
 {
 	return rv_i_insn(imm11_0, rs1, 2, rd, 0x03);
 }
+#endif
 
-#if 0
 static u32 rv_lwu(u8 rd, u16 imm11_0, u8 rs1)
 {
 	return rv_i_insn(imm11_0, rs1, 6, rd, 0x03);
 }
-#endif
 
 static u32 rv_ld(u8 rd, u16 imm11_0, u8 rs1)
 {
@@ -1176,37 +1176,37 @@ static int emit_insn(const struct bpf_insn *insn, struct rv_jit_context *ctx,
 		rs = bpf_to_rv_reg(insn->src_reg, ctx);
 		rd = bpf_to_rv_reg(insn->dst_reg, ctx);
 		if (is_12b_int(off)) {
-			emit(rv_lb(rd, off, rs), ctx);
+			emit(rv_lbu(rd, off, rs), ctx);
 			break;
 		}
 
 		emit_imm(RV_REG_T1, off, ctx);
 		emit(rv_add(RV_REG_T1, RV_REG_T1, rs), ctx);
-		emit(rv_lb(rd, 0, RV_REG_T1), ctx);
+		emit(rv_lbu(rd, 0, RV_REG_T1), ctx);
 		break;
 	case BPF_LDX | BPF_MEM | BPF_H:
 		rs = bpf_to_rv_reg(insn->src_reg, ctx);
 		rd = bpf_to_rv_reg(insn->dst_reg, ctx);
 		if (is_12b_int(off)) {
-			emit(rv_lh(rd, off, rs), ctx);
+			emit(rv_lhu(rd, off, rs), ctx);
 			break;
 		}
 
 		emit_imm(RV_REG_T1, off, ctx);
 		emit(rv_add(RV_REG_T1, RV_REG_T1, rs), ctx);
-		emit(rv_lh(rd, 0, RV_REG_T1), ctx);
+		emit(rv_lhu(rd, 0, RV_REG_T1), ctx);
 		break;
 	case BPF_LDX | BPF_MEM | BPF_W:
 		rs = bpf_to_rv_reg(insn->src_reg, ctx);
 		rd = bpf_to_rv_reg(insn->dst_reg, ctx);
 		if (is_12b_int(off)) {
-			emit(rv_lw(rd, off, rs), ctx);
+			emit(rv_lwu(rd, off, rs), ctx);
 			break;
 		}
 
 		emit_imm(RV_REG_T1, off, ctx);
 		emit(rv_add(RV_REG_T1, RV_REG_T1, rs), ctx);
-		emit(rv_lw(rd, 0, RV_REG_T1), ctx);
+		emit(rv_lwu(rd, 0, RV_REG_T1), ctx);
 		break;
 	case BPF_LDX | BPF_MEM | BPF_DW:
 		rs = bpf_to_rv_reg(insn->src_reg, ctx);
