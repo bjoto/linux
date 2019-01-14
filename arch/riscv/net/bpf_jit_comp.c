@@ -385,7 +385,7 @@ static u32 rv_bge(u8 rs1, u8 rs2, u16 imm12_1)
 
 static u32 rv_sb(u8 rs1, u16 imm11_0, u8 rs2)
 {
-	return rv_sb_insn(imm11_0, rs2, rs1, 0, 0x23);
+	return rv_s_insn(imm11_0, rs2, rs1, 0, 0x23);
 }
 
 static u32 rv_sh(u8 rs1, u16 imm11_0, u8 rs2)
