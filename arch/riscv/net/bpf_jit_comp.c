@@ -491,7 +491,7 @@ static void emit_imm(u8 rd, s64 val, struct rv_jit_context *ctx)
 			return;
 		}
 
-		emit(rv_addi(rd, rd, lower), ctx);
+		emit(rv_addiw(rd, rd, lower), ctx);
 		return;
 	}
 
