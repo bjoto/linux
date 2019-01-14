@@ -236,24 +236,24 @@ static u32 rv_mul(u8 rd, u8 rs1, u8 rs2)
 	return rv_r_insn(1, rs2, rs1, 0, rd, 0x33);
 }
 
-static u32 rv_divw(u8 rd, u8 rs1, u8 rs2)
+static u32 rv_divuw(u8 rd, u8 rs1, u8 rs2)
 {
-	return rv_r_insn(1, rs2, rs1, 4, rd, 0x3b);
+	return rv_r_insn(1, rs2, rs1, 5, rd, 0x3b);
 }
 
-static u32 rv_div(u8 rd, u8 rs1, u8 rs2)
+static u32 rv_divu(u8 rd, u8 rs1, u8 rs2)
 {
-	return rv_r_insn(1, rs2, rs1, 4, rd, 0x33);
+	return rv_r_insn(1, rs2, rs1, 5, rd, 0x33);
 }
 
-static u32 rv_remw(u8 rd, u8 rs1, u8 rs2)
+static u32 rv_remuw(u8 rd, u8 rs1, u8 rs2)
 {
-	return rv_r_insn(1, rs2, rs1, 6, rd, 0x3b);
+	return rv_r_insn(1, rs2, rs1, 7, rd, 0x3b);
 }
 
-static u32 rv_rem(u8 rd, u8 rs1, u8 rs2)
+static u32 rv_remu(u8 rd, u8 rs1, u8 rs2)
 {
-	return rv_r_insn(1, rs2, rs1, 6, rd, 0x33);
+	return rv_r_insn(1, rs2, rs1, 7, rd, 0x33);
 }
 
 static u32 rv_sllw(u8 rd, u8 rs1, u8 rs2)
@@ -578,18 +578,30 @@ static int emit_insn(const struct bpf_insn *insn, struct rv_jit_context *ctx,
 		rs = bpf_to_rv_reg(insn->src_reg, ctx);
 		rd = bpf_to_rv_reg(insn->dst_reg, ctx);
 		emit(is64 ? rv_mul(rd, rd, rs) : rv_mulw(rd, rd, rs), ctx);
+		if (!is64) {
+			emit(rv_slli(rd, rd, 32), ctx);
+			emit(rv_srli(rd, rd, 32), ctx);
+		}
 		break;
 	case BPF_ALU | BPF_DIV | BPF_X:
 	case BPF_ALU64 | BPF_DIV | BPF_X:
 		rs = bpf_to_rv_reg(insn->src_reg, ctx);
 		rd = bpf_to_rv_reg(insn->dst_reg, ctx);
-		emit(is64 ? rv_div(rd, rd, rs) : rv_divw(rd, rd, rs), ctx);
+		emit(is64 ? rv_divu(rd, rd, rs) : rv_divuw(rd, rd, rs), ctx);
+		if (!is64) {
+			emit(rv_slli(rd, rd, 32), ctx);
+			emit(rv_srli(rd, rd, 32), ctx);
+		}
 		break;
 	case BPF_ALU | BPF_MOD | BPF_X:
 	case BPF_ALU64 | BPF_MOD | BPF_X:
 		rs = bpf_to_rv_reg(insn->src_reg, ctx);
 		rd = bpf_to_rv_reg(insn->dst_reg, ctx);
-		emit(is64 ? rv_rem(rd, rd, rs) : rv_remw(rd, rd, rs), ctx);
+		emit(is64 ? rv_remu(rd, rd, rs) : rv_remuw(rd, rd, rs), ctx);
+		if (!is64) {
+			emit(rv_slli(rd, rd, 32), ctx);
+			emit(rv_srli(rd, rd, 32), ctx);
+		}
 		break;
 	case BPF_ALU | BPF_LSH | BPF_X:
 	case BPF_ALU64 | BPF_LSH | BPF_X:
@@ -698,11 +710,19 @@ static int emit_insn(const struct bpf_insn *insn, struct rv_jit_context *ctx,
 		if (is_12b_int(imm)) {
 			emit(is64 ? rv_addi(rd, rd, imm) :
 			     rv_addiw(rd, rd, imm), ctx);
+			if (!is64) {
+				emit(rv_slli(rd, rd, 32), ctx);
+				emit(rv_srli(rd, rd, 32), ctx);
+			}
 			break;
 		}
 		emit_imm(RV_REG_T1, imm, ctx);
 		emit(is64 ? rv_add(rd, rd, RV_REG_T1) :
 		     rv_addw(rd, rd, RV_REG_T1), ctx);
+		if (!is64) {
+			emit(rv_slli(rd, rd, 32), ctx);
+			emit(rv_srli(rd, rd, 32), ctx);
+		}
 		break;
 	case BPF_ALU | BPF_SUB | BPF_K:
 	case BPF_ALU64 | BPF_SUB | BPF_K:
@@ -710,41 +730,73 @@ static int emit_insn(const struct bpf_insn *insn, struct rv_jit_context *ctx,
 		if (is_12b_int(-imm)) {
 			emit(is64 ? rv_addi(rd, rd, -imm) :
 			     rv_addiw(rd, rd, -imm), ctx);
+			if (!is64) {
+				emit(rv_slli(rd, rd, 32), ctx);
+				emit(rv_srli(rd, rd, 32), ctx);
+			}
 			break;
 		}
 		emit_imm(RV_REG_T1, imm, ctx);
 		emit(is64 ? rv_sub(rd, rd, RV_REG_T1) :
 		     rv_subw(rd, rd, RV_REG_T1), ctx);
+		if (!is64) {
+			emit(rv_slli(rd, rd, 32), ctx);
+			emit(rv_srli(rd, rd, 32), ctx);
+		}
 		break;
 	case BPF_ALU | BPF_AND | BPF_K:
 	case BPF_ALU64 | BPF_AND | BPF_K:
 		rd = bpf_to_rv_reg(insn->dst_reg, ctx);
 		if (is_12b_int(imm)) {
 			emit(rv_andi(rd, rd, imm), ctx);
+			if (!is64) {
+				emit(rv_slli(rd, rd, 32), ctx);
+				emit(rv_srli(rd, rd, 32), ctx);
+			}
 			break;
 		}
 		emit_imm(RV_REG_T1, imm, ctx);
 		emit(rv_and(rd, rd, RV_REG_T1), ctx);
+		if (!is64) {
+			emit(rv_slli(rd, rd, 32), ctx);
+			emit(rv_srli(rd, rd, 32), ctx);
+		}
 		break;
 	case BPF_ALU | BPF_OR | BPF_K:
 	case BPF_ALU64 | BPF_OR | BPF_K:
 		rd = bpf_to_rv_reg(insn->dst_reg, ctx);
 		if (is_12b_int(imm)) {
 			emit(rv_ori(rd, rd, imm), ctx);
+			if (!is64) {
+				emit(rv_slli(rd, rd, 32), ctx);
+				emit(rv_srli(rd, rd, 32), ctx);
+			}
 			break;
 		}
 		emit_imm(RV_REG_T1, imm, ctx);
 		emit(rv_or(rd, rd, RV_REG_T1), ctx);
+		if (!is64) {
+			emit(rv_slli(rd, rd, 32), ctx);
+			emit(rv_srli(rd, rd, 32), ctx);
+		}
 		break;
 	case BPF_ALU | BPF_XOR | BPF_K:
 	case BPF_ALU64 | BPF_XOR | BPF_K:
 		rd = bpf_to_rv_reg(insn->dst_reg, ctx);
 		if (is_12b_int(imm)) {
 			emit(rv_xori(rd, rd, imm), ctx);
+			if (!is64) {
+				emit(rv_slli(rd, rd, 32), ctx);
+				emit(rv_srli(rd, rd, 32), ctx);
+			}
 			break;
 		}
 		emit_imm(RV_REG_T1, imm, ctx);
 		emit(rv_xor(rd, rd, RV_REG_T1), ctx);
+		if (!is64) {
+			emit(rv_slli(rd, rd, 32), ctx);
+			emit(rv_srli(rd, rd, 32), ctx);
+		}
 		break;
 	case BPF_ALU | BPF_MUL | BPF_K:
 	case BPF_ALU64 | BPF_MUL | BPF_K:
@@ -752,20 +804,32 @@ static int emit_insn(const struct bpf_insn *insn, struct rv_jit_context *ctx,
 		emit_imm(RV_REG_T1, imm, ctx);
 		emit(is64 ? rv_mul(rd, rd, RV_REG_T1) :
 		     rv_mulw(rd, rd, RV_REG_T1), ctx);
+		if (!is64) {
+			emit(rv_slli(rd, rd, 32), ctx);
+			emit(rv_srli(rd, rd, 32), ctx);
+		}
 		break;
 	case BPF_ALU | BPF_DIV | BPF_K:
 	case BPF_ALU64 | BPF_DIV | BPF_K:
 		rd = bpf_to_rv_reg(insn->dst_reg, ctx);
 		emit_imm(RV_REG_T1, imm, ctx);
-		emit(is64 ? rv_div(rd, rd, RV_REG_T1) :
-		     rv_divw(rd, rd, RV_REG_T1), ctx);
+		emit(is64 ? rv_divu(rd, rd, RV_REG_T1) :
+		     rv_divuw(rd, rd, RV_REG_T1), ctx);
+		if (!is64) {
+			emit(rv_slli(rd, rd, 32), ctx);
+			emit(rv_srli(rd, rd, 32), ctx);
+		}
 		break;
 	case BPF_ALU | BPF_MOD | BPF_K:
 	case BPF_ALU64 | BPF_MOD | BPF_K:
 		rd = bpf_to_rv_reg(insn->dst_reg, ctx);
 		emit_imm(RV_REG_T1, imm, ctx);
-		emit(is64 ? rv_rem(rd, rd, RV_REG_T1) :
-		     rv_remw(rd, rd, RV_REG_T1), ctx);
+		emit(is64 ? rv_remu(rd, rd, RV_REG_T1) :
+		     rv_remuw(rd, rd, RV_REG_T1), ctx);
+		if (!is64) {
+			emit(rv_slli(rd, rd, 32), ctx);
+			emit(rv_srli(rd, rd, 32), ctx);
+		}
 		break;
 	case BPF_ALU | BPF_LSH | BPF_K:
 	case BPF_ALU64 | BPF_LSH | BPF_K:
