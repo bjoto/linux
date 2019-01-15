@@ -136,7 +136,6 @@ static void emit(const u32 insn, struct rv_jit_context *ctx)
 	ctx->ninsns++;
 }
 
-// RVstart
 static u32 rv_r_insn(u8 funct7, u8 rs2, u8 rs1, u8 funct3, u8 rd, u8 opcode)
 {
 	return (funct7 << 25) | (rs2 << 20) | (rs1 << 15) | (funct3 << 12) |
@@ -179,6 +178,14 @@ static u32 rv_uj_insn(u32 imm20_1, u8 rd, u8 opcode)
 	      ((imm20_1 & 0x400) >> 2) | ((imm20_1 & 0x7f800) >> 11);
 
 	return (imm << 12) | (rd << 7) | opcode;
+}
+
+static u32 rv_amo_insn(u8 funct5, u8 aq, u8 rl, u8 rs2, u8 rs1,
+		       u8 funct3, u8 rd, u8 opcode)
+{
+	u8 funct7 = (funct5 << 2) | (aq << 1) | rl;
+
+	return rv_r_insn(funct7, rs2, rs1, funct3, rd, opcode);
 }
 
 static u32 rv_addiw(u8 rd, u8 rs1, u16 imm11_0)
@@ -444,6 +451,16 @@ static u32 rv_ld(u8 rd, u16 imm11_0, u8 rs1)
 	return rv_i_insn(imm11_0, rs1, 3, rd, 0x03);
 }
 
+static u32 rv_amoadd_w(u8 rd, u8 rs2, u8 rs1, u8 aq, u8 rl)
+{
+	return rv_amo_insn(0, aq, rl, rs2, rs1, 2, rd, 0x2f);
+}
+
+static u32 rv_amoadd_d(u8 rd, u8 rs2, u8 rs1, u8 aq, u8 rl)
+{
+	return rv_amo_insn(0, aq, rl, rs2, rs1, 3, rd, 0x2f);
+}
+
 static bool is_12b_int(s64 val)
 {
 	return -(1 << 11) <= val && val < (1 << 11);
@@ -696,7 +713,7 @@ static int emit_insn(const struct bpf_insn *insn, struct rv_jit_context *ctx,
 	case BPF_ALU | BPF_MOV | BPF_K:
 	case BPF_ALU64 | BPF_MOV | BPF_K:
 		rd = bpf_to_rv_reg(insn->dst_reg, ctx);
-		emit_imm(rd, imm, ctx); // XXX: use w opcodes?
+		emit_imm(rd, imm, ctx);
 		if (!is64) {
 			emit(rv_slli(rd, rd, 32), ctx);
 			emit(rv_srli(rd, rd, 32), ctx);
@@ -1325,8 +1342,23 @@ static int emit_insn(const struct bpf_insn *insn, struct rv_jit_context *ctx,
 	case BPF_STX | BPF_XADD | BPF_W:
 	/* STX XADD: lock *(u64 *)(dst + off) += src */
 	case BPF_STX | BPF_XADD | BPF_DW:
-		pr_err("bpf-jit: xadd not supported yet!\n");
-		return -1;
+		rs = bpf_to_rv_reg(insn->src_reg, ctx);
+		rd = bpf_to_rv_reg(insn->dst_reg, ctx);
+		if (off) {
+			if (is_12b_int(off)) {
+				emit(rv_addi(RV_REG_T1, rd, off), ctx);
+			} else {
+				emit_imm(RV_REG_T1, off, ctx);
+				emit(rv_add(RV_REG_T1, RV_REG_T1, rd), ctx);
+			}
+
+			rd = RV_REG_T1;
+		}
+
+		emit(BPF_SIZE(code) == BPF_W ?
+		     rv_amoadd_w(RV_REG_ZERO, rs, rd, 0, 0) :
+		     rv_amoadd_d(RV_REG_ZERO, rs, rd, 0, 0), ctx);
+		break;
 	default:
 		pr_err("bpf-jit: unknown opcode %02x\n", code);
 		return -EINVAL;
