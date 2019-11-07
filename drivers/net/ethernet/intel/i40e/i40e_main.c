@@ -104,6 +104,7 @@ MODULE_LICENSE("GPL v2");
 MODULE_VERSION(DRV_VERSION);
 
 static struct workqueue_struct *i40e_wq;
+static struct bpf_dispatcher *i40e_bpf_disp;
 
 /**
  * i40e_allocate_dma_mem_d - OS specific memory alloc for shared code
@@ -12529,7 +12530,7 @@ static int i40e_xdp_setup(struct i40e_vsi *vsi,
 	struct i40e_pf *pf = vsi->back;
 	struct bpf_prog *old_prog;
 	bool need_reset;
-	int i;
+	int i, err, id;
 
 	/* Don't allow frames that span over multiple buffers */
 	if (frame_size > vsi->rx_buf_len)
@@ -12541,13 +12542,44 @@ static int i40e_xdp_setup(struct i40e_vsi *vsi,
 	/* When turning XDP on->off/off->on we reset and rebuild the rings. */
 	need_reset = (i40e_enabled_xdp_vsi(vsi) != !!prog);
 
-	if (need_reset)
+	if (need_reset) {
+		if (prog) {
+			err = bpf_dispatcher_get_slot(i40e_bpf_disp, &id, prog);
+			if (err) {
+				/* XXX Fallback */
+				return err;
+			}
+			vsi->xdp_id = id;
+			for (i = 0; i < vsi->num_queue_pairs; i++)
+				vsi->rx_rings[i]->id = id;
+
+		} else {
+			for (i = 0; i < vsi->num_queue_pairs; i++)
+				vsi->rx_rings[i]->xdp_prog = NULL;
+			err = bpf_dispatcher_remove_slot(i40e_bpf_disp,
+							 vsi->xdp_id);
+			if (err) {
+				return err;
+			}
+		}
 		i40e_prep_for_reset(pf, true);
+	} else {
+		if (prog) {
+			err = bpf_dispatcher_update_slot(i40e_bpf_disp,
+							 vsi->xdp_id, prog);
+			if (err)
+				;
+		}
+	}
 
 	old_prog = xchg(&vsi->xdp_prog, prog);
 
 	if (need_reset)
 		i40e_reset_and_rebuild(pf, true, true);
+
+	// bpf_dispatcher_get_slot(), bpf_dispatcher_update_slot or,
+	// bpf_dispatcher_remove_slot() here.
+	// vsi->xdp_id and ring->id assigned here...
 
 	for (i = 0; i < vsi->num_queue_pairs; i++)
 		WRITE_ONCE(vsi->rx_rings[i]->xdp_prog, vsi->xdp_prog);
@@ -15805,6 +15837,13 @@ static int __init i40e_init_module(void)
 		return -ENOMEM;
 	}
 
+	i40e_bpf_disp = bpf_dispatcher_alloc(i40e_bpf_dispatcher_tramp);
+	if (!i40e_bpf_disp) {
+		/* XXX fallback */
+		pr_err("%s: Failed to alloc BPF dispatcher\n", i40e_driver_name);
+		return -ENOMEM;
+	}
+
 	i40e_dbg_init();
 	return pci_register_driver(&i40e_driver);
 }
@@ -15819,6 +15858,7 @@ module_init(i40e_init_module);
 static void __exit i40e_exit_module(void)
 {
 	pci_unregister_driver(&i40e_driver);
+	bpf_dispatcher_free(i40e_bpf_disp);
 	destroy_workqueue(i40e_wq);
 	i40e_dbg_exit();
 }

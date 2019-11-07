@@ -4,6 +4,8 @@
 #ifndef I40E_TXRX_COMMON_
 #define I40E_TXRX_COMMON_
 
+unsigned int i40e_bpf_dispatcher_tramp(void *ctx, void *insn, int id);
+
 void i40e_fd_handle_status(struct i40e_ring *rx_ring,
 			   union i40e_rx_desc *rx_desc, u8 prog_id);
 int i40e_xmit_xdp_tx_ring(struct xdp_buff *xdp, struct i40e_ring *xdp_ring);

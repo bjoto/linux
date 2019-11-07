@@ -845,6 +845,7 @@ struct i40e_vsi {
 	irqreturn_t (*irq_handler)(int irq, void *data);
 
 	unsigned long *af_xdp_zc_qps; /* tracks AF_XDP ZC enabled qps */
+	int xdp_id;
 } ____cacheline_internodealigned_in_smp;
 
 struct i40e_netdev_priv {
@@ -1163,4 +1164,6 @@ int i40e_add_del_cloud_filter(struct i40e_vsi *vsi,
 int i40e_add_del_cloud_filter_big_buf(struct i40e_vsi *vsi,
 				      struct i40e_cloud_filter *filter,
 				      bool add);
+unsigned int i40e_bpf_dispatcher_tramp(void *ctx, void *insn, int id);
+
 #endif /* _I40E_H_ */

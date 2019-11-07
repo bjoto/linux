@@ -2188,6 +2188,11 @@ int i40e_xmit_xdp_tx_ring(struct xdp_buff *xdp, struct i40e_ring *xdp_ring)
 	return i40e_xmit_xdp_ring(xdpf, xdp_ring);
 }
 
+unsigned int i40e_bpf_dispatcher_tramp(void *ctx, void *insn, int id)
+{
+	return 0;
+}
+
 /**
  * i40e_run_xdp - run an XDP program
  * @rx_ring: Rx ring being processed
@@ -2209,7 +2214,10 @@ static struct sk_buff *i40e_run_xdp(struct i40e_ring *rx_ring,
 
 	prefetchw(xdp->data_hard_start); /* xdp_frame write */
 
-	act = bpf_prog_run_xdp(xdp_prog, xdp);
+	/* XXX clean up the call, hide insns ugliness, and proper
+	 * stats.
+	 */
+	act = i40e_bpf_dispatcher_tramp(xdp, xdp_prog->insns, rx_ring->id);
 	switch (act) {
 	case XDP_PASS:
 		break;
