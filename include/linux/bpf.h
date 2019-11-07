@@ -452,11 +452,32 @@ struct bpf_trampoline {
 	void *image;
 	u64 selector;
 };
+
+/* 4 compares, ~160B x86-64 code */
+#define BPF_DISPATCHER_MAX 16
+
+struct bpf_dispatcher {
+	struct bpf_prog *progs[BPF_DISPATCHER_MAX];
+	int max_ids;
+	int num_ids;
+	void *image;
+	u64 selector;
+	void *func; /* trampoline */
+};
 #ifdef CONFIG_BPF_JIT
 struct bpf_trampoline *bpf_trampoline_lookup(u64 key);
 int bpf_trampoline_link_prog(struct bpf_prog *prog);
 int bpf_trampoline_unlink_prog(struct bpf_prog *prog);
 void bpf_trampoline_put(struct bpf_trampoline *tr);
+
+struct bpf_dispatcher *bpf_dispatcher_alloc(void *func);
+void bpf_dispatcher_free(struct bpf_dispatcher *d);
+int bpf_dispatcher_update(struct bpf_dispatcher *d);
+int bpf_dispatcher_get_slot(struct bpf_dispatcher *d, int *id,
+			    struct bpf_prog *prog);
+int bpf_dispatcher_update_slot(struct bpf_dispatcher *d, int id,
+			       struct bpf_prog *prog);
+int bpf_dispatcher_remove_slot(struct bpf_dispatcher *d, int id);
 #else
 static inline struct bpf_trampoline *bpf_trampoline_lookup(u64 key)
 {
@@ -471,6 +492,29 @@ static inline int bpf_trampoline_unlink_prog(struct bpf_prog *prog)
 	return -ENOTSUPP;
 }
 static inline void bpf_trampoline_put(struct bpf_trampoline *tr) {}
+static inline struct bpf_dispatcher *bpf_dispatcher_alloc(void *func)
+{
+	return NULL;
+}
+static inline void bpf_dispatcher_free(struct bpf_dispatcher *d) {}
+static inline int bpf_dispatcher_update(struct bpf_dispatcher *d)
+{
+	return -EINVAL;
+}
+static inline int bpf_dispatcher_get_slot(struct bpf_dispatcher *d, int *id,
+					  struct bpf_prog *prog)
+{
+	return -EINVAL;
+}
+static inline int bpf_dispatcher_update_slot(struct bpf_dispatcher *d, int id,
+					     struct bpf_prog *prog)
+{
+	return -EINVAL;
+}
+static inline int bpf_dispatcher_remove_slot(struct bpf_dispatcher *d, int id)
+{
+	return -EINVAL;
+}
 #endif
 
 struct bpf_func_info_aux {

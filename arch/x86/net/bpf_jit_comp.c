@@ -1471,6 +1471,72 @@ int arch_prepare_bpf_trampoline(void *image, struct btf_func_model *m, u32 flags
 	return 0;
 }
 
+static unsigned int __bpf_dispatcher_dummy(void *a, void *b)
+{
+	return 0;
+}
+
+/* Emits the dispatcher. Id lookup is limited to BPF_DISPATCHER_MAX,
+ * so it'll fit into PAGE_SIZE/2. The lookup is binary search: O(log
+ * n).
+ */
+static int emit_bpf_dispatcher(u8 **pprog, int a, int b,
+			       struct bpf_prog **progs)
+{
+	u8 *prog = *pprog, *jg_reloc;
+	int pivot, err, cnt = 0;
+	s64 jmp_offset;
+	void *func;
+
+	if (a == b) {
+		func = progs[a] ? (void *)progs[a]->bpf_func :
+		       (void *)__bpf_dispatcher_dummy;
+		err = emit_jmp(&prog, func, prog);
+		if (err)
+			return err;
+		goto out;
+	}
+
+	pivot = (b - a) / 2;
+	EMIT3(0x83, 0xFA, a + pivot); /* cmp edx, a + pivot */
+
+	jg_reloc = prog;
+	EMIT2(X86_JG, 0); /* jg placeholder */
+
+	err = emit_bpf_dispatcher(&prog, a, a + pivot, progs);
+	if (err)
+		return err;
+
+	/* ...and fixup jg */
+	jmp_offset = prog - (jg_reloc + 2);
+	if (!is_imm8(jmp_offset))
+		return -1;
+	emit_code(jg_reloc, X86_JG + (jmp_offset << 8), 2);
+
+	err = emit_bpf_dispatcher(&prog, a + pivot + 1, b, progs);
+	if (err)
+		return err;
+
+out:
+	*pprog = prog;
+	return 0;
+}
+
+int arch_prepare_bpf_dispatcher(void *image, struct bpf_prog **progs,
+				int num_ids)
+{
+	u8 *prog = image;
+
+	/* XXX Validate on entry, e.g.?
+	 *    0:   83 fa 13                cmp    num_ids-1,%edx
+	 *    3:   76 03                   jbe    8
+	 *    5:   31 c0                   xor    %eax,%eax
+	 *    7:   c3                      retq
+	 *    8:   ...
+	 */
+	return emit_bpf_dispatcher(&prog, 0, num_ids - 1, progs);
+}
+
 struct x64_jit_data {
 	struct bpf_binary_header *header;
 	int *addrs;
