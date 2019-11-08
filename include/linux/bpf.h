@@ -1270,6 +1270,9 @@ enum bpf_text_poke_type {
 	BPF_MOD_NOP_TO_CALL,
 	BPF_MOD_CALL_TO_CALL,
 	BPF_MOD_CALL_TO_NOP,
+	BPF_MOD_NOP_TO_JMP,
+	BPF_MOD_JMP_TO_JMP,
+	BPF_MOD_JMP_TO_NOP,
 };
 int bpf_arch_text_poke(void *ip, enum bpf_text_poke_type t,
 		       void *addr1, void *addr2);

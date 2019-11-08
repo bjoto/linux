@@ -481,7 +481,7 @@ static void emit_stx(u8 **pprog, u32 size, u32 dst_reg, u32 src_reg, int off)
 	*pprog = prog;
 }
 
-static int emit_call(u8 **pprog, void *func, void *ip)
+static int emit_call_jmp(u8 **pprog, void *func, void *ip, u8 insn)
 {
 	u8 *prog = *pprog;
 	int cnt = 0;
@@ -492,9 +492,20 @@ static int emit_call(u8 **pprog, void *func, void *ip)
 		pr_err("Target call %p is out of range\n", func);
 		return -EINVAL;
 	}
-	EMIT1_off32(0xE8, offset);
+	EMIT1_off32(insn, offset);
 	*pprog = prog;
 	return 0;
+}
+
+static int emit_call(u8 **pprog, void *func, void *ip)
+{
+	return emit_call_jmp(pprog, func, ip, 0xE8);
+}
+
+/* Emits tail-call */
+static int emit_jmp(u8 **pprog, void *func, void *ip)
+{
+	return emit_call_jmp(pprog, func, ip, 0xE9);
 }
 
 int bpf_arch_text_poke(void *ip, enum bpf_text_poke_type t,
@@ -502,7 +513,7 @@ int bpf_arch_text_poke(void *ip, enum bpf_text_poke_type t,
 {
 	u8 old_insn[X86_CALL_SIZE] = {};
 	u8 new_insn[X86_CALL_SIZE] = {};
-	u8 *prog;
+	u8 *prog, insn;
 	int ret;
 
 	if (!is_kernel_text((long)ip) &&
@@ -510,31 +521,44 @@ int bpf_arch_text_poke(void *ip, enum bpf_text_poke_type t,
 		/* BPF trampoline in modules is not supported */
 		return -EINVAL;
 
+	switch (t) {
+	case BPF_MOD_NOP_TO_CALL:
+	case BPF_MOD_CALL_TO_CALL:
+	case BPF_MOD_CALL_TO_NOP:
+		insn = 0xE8;
+		break;
+	default:
+		insn = 0xE9;
+	}
+
 	if (old_addr) {
 		prog = old_insn;
-		ret = emit_call(&prog, old_addr, (void *)ip);
+		ret = emit_call_jmp(&prog, old_addr, (void *)ip, insn);
 		if (ret)
 			return ret;
 	}
 	if (new_addr) {
 		prog = new_insn;
-		ret = emit_call(&prog, new_addr, (void *)ip);
+		ret = emit_call_jmp(&prog, new_addr, (void *)ip, insn);
 		if (ret)
 			return ret;
 	}
 	ret = -EBUSY;
 	mutex_lock(&text_mutex);
 	switch (t) {
+	case BPF_MOD_NOP_TO_JMP:
 	case BPF_MOD_NOP_TO_CALL:
 		if (memcmp(ip, ideal_nops[NOP_ATOMIC5], X86_CALL_SIZE))
 			goto out;
 		text_poke(ip, new_insn, X86_CALL_SIZE);
 		break;
+	case BPF_MOD_JMP_TO_JMP:
 	case BPF_MOD_CALL_TO_CALL:
 		if (memcmp(ip, old_insn, X86_CALL_SIZE))
 			goto out;
 		text_poke(ip, new_insn, X86_CALL_SIZE);
 		break;
+	case BPF_MOD_JMP_TO_NOP:
 	case BPF_MOD_CALL_TO_NOP:
 		if (memcmp(ip, old_insn, X86_CALL_SIZE))
 			goto out;
