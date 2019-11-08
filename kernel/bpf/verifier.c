@@ -9382,8 +9382,11 @@ static int check_attach_btf_id(struct bpf_verifier_env *env)
 	struct bpf_prog *prog = env->prog;
 	u32 btf_id = prog->aux->attach_btf_id;
 	const char prefix[] = "btf_trace_";
+	struct bpf_trampoline *tr;
 	const struct btf_type *t;
 	const char *tname;
+	long addr;
+	int ret;
 
 	if (prog->type != BPF_PROG_TYPE_TRACING)
 		return 0;
@@ -9431,6 +9434,42 @@ static int check_attach_btf_id(struct bpf_verifier_env *env)
 		prog->aux->attach_func_name = tname;
 		prog->aux->attach_func_proto = t;
 		prog->aux->attach_btf_trace = true;
+		return 0;
+	case BPF_TRACE_FENTRY:
+	case BPF_TRACE_FEXIT:
+		if (!btf_type_is_func(t)) {
+			verbose(env, "attach_btf_id %u is not a function\n",
+				btf_id);
+			return -EINVAL;
+		}
+		t = btf_type_by_id(btf_vmlinux, t->type);
+		if (!btf_type_is_func_proto(t))
+			return -EINVAL;
+		tr = bpf_trampoline_lookup(btf_id);
+		if (!tr)
+			return -ENOMEM;
+		prog->aux->attach_func_name = tname;
+		prog->aux->attach_func_proto = t;
+		if (tr->func.addr) {
+			prog->aux->trampoline = tr;
+			return 0;
+		}
+		ret = btf_distill_func_proto(&env->log, btf_vmlinux, t,
+					     tname, &tr->func.model);
+		if (ret < 0) {
+			bpf_trampoline_put(tr);
+			return ret;
+		}
+		addr = kallsyms_lookup_name(tname);
+		if (!addr) {
+			verbose(env,
+				"The address of function %s cannot be found\n",
+				tname);
+			bpf_trampoline_put(tr);
+			return -ENOENT;
+		}
+		tr->func.addr = (void *)addr;
+		prog->aux->trampoline = tr;
 		return 0;
 	default:
 		return -EINVAL;
