@@ -3493,12 +3493,45 @@ errout:
 }
 
 extern struct btf *btf_vmlinux;
+struct btf *bpf_prog_get_target_btf(const struct bpf_prog *prog)
+{
+	struct bpf_prog *tgt_prog = prog->aux->linked_prog;
+
+	if (tgt_prog) {
+		return tgt_prog->aux->btf;
+	} else {
+		return btf_vmlinux;
+	}
+}
+
+static bool btf_translate_to_vmlinux(struct bpf_verifier_log *log,
+				     struct btf *btf,
+				     const struct btf_type *t,
+				     struct bpf_insn_access_aux *info)
+{
+	const char *tname = __btf_name_by_offset(btf, t->name_off);
+	int btf_id;
+
+	if (!tname) {
+		bpf_log(log, "Program's type doesn't have a name\n");
+		return false;
+	}
+	if (strcmp(tname, "__sk_buff") == 0) {
+		btf_id = btf_resolve_helper_id(log, &bpf_skb_output_proto, 0);
+		if (btf_id < 0)
+			return false;
+		info->btf_id = btf_id;
+		return true;
+	}
+	return false;
+}
 
 bool btf_ctx_access(int off, int size, enum bpf_access_type type,
 		    const struct bpf_prog *prog,
 		    struct bpf_insn_access_aux *info)
 {
 	const struct btf_type *t = prog->aux->attach_func_proto;
+	struct btf *btf = bpf_prog_get_target_btf(prog);
 	const char *tname = prog->aux->attach_func_name;
 	struct bpf_verifier_log *log = info->log;
 	const struct btf_param *args;
@@ -3511,7 +3544,8 @@ bool btf_ctx_access(int off, int size, enum bpf_access_type type,
 	}
 	arg = off / 8;
 	args = (const struct btf_param *)(t + 1);
-	nr_args = btf_type_vlen(t);
+	/* if (t == NULL) Fall back to default BPF prog with 5 u64 arguments */
+	nr_args = t ? btf_type_vlen(t) : 5;
 	if (prog->aux->attach_btf_trace) {
 		/* skip first 'void *__data' argument in btf_trace_##name typedef */
 		args++;
@@ -3520,18 +3554,24 @@ bool btf_ctx_access(int off, int size, enum bpf_access_type type,
 
 	if (prog->expected_attach_type == BPF_TRACE_FEXIT &&
 	    arg == nr_args) {
+		if (!t)
+			/* Default prog with 5 args. 6th arg is retval. */
+			return true;
 		/* function return type */
-		t = btf_type_by_id(btf_vmlinux, t->type);
+		t = btf_type_by_id(btf, t->type);
 	} else if (arg >= nr_args) {
 		bpf_log(log, "func '%s' doesn't have %d-th argument\n",
 			tname, arg + 1);
 		return false;
 	} else {
-		t = btf_type_by_id(btf_vmlinux, args[arg].type);
+		if (!t)
+			/* Default prog with 5 args */
+			return true;
+		t = btf_type_by_id(btf, args[arg].type);
 	}
 	/* skip modifiers */
 	while (btf_type_is_modifier(t))
-		t = btf_type_by_id(btf_vmlinux, t->type);
+		t = btf_type_by_id(btf, t->type);
 	if (btf_type_is_int(t))
 		/* accessing a scalar */
 		return true;
@@ -3539,7 +3579,7 @@ bool btf_ctx_access(int off, int size, enum bpf_access_type type,
 		bpf_log(log,
 			"func '%s' arg%d '%s' has type %s. Only pointer access is allowed\n",
 			tname, arg,
-			__btf_name_by_offset(btf_vmlinux, t->name_off),
+			__btf_name_by_offset(btf, t->name_off),
 			btf_kind_str[BTF_INFO_KIND(t->info)]);
 		return false;
 	}
@@ -3554,10 +3594,10 @@ bool btf_ctx_access(int off, int size, enum bpf_access_type type,
 	info->reg_type = PTR_TO_BTF_ID;
 	info->btf_id = t->type;
 
-	t = btf_type_by_id(btf_vmlinux, t->type);
+	t = btf_type_by_id(btf, t->type);
 	/* skip modifiers */
 	while (btf_type_is_modifier(t))
-		t = btf_type_by_id(btf_vmlinux, t->type);
+		t = btf_type_by_id(btf, t->type);
 	if (!btf_type_is_struct(t)) {
 		bpf_log(log,
 			"func '%s' arg%d type %s is not a struct\n",
@@ -3566,7 +3606,9 @@ bool btf_ctx_access(int off, int size, enum bpf_access_type type,
 	}
 	bpf_log(log, "func '%s' arg%d has btf_id %d type %s '%s'\n",
 		tname, arg, info->btf_id, btf_kind_str[BTF_INFO_KIND(t->info)],
-		__btf_name_by_offset(btf_vmlinux, t->name_off));
+		__btf_name_by_offset(btf, t->name_off));
+	if (btf != btf_vmlinux)
+		return btf_translate_to_vmlinux(log, btf, t, info);
 	return true;
 }
 
