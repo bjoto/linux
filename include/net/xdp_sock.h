@@ -44,11 +44,14 @@ struct xdp_umem_fq_reuse {
 struct xdp_umem {
 	struct xsk_queue *fq;
 	struct xsk_queue *cq;
+	bool unaligned_buff_pool;
+	void *buff_pool;
 	struct xdp_umem_page *pages;
 	u64 chunk_mask;
 	u64 size;
 	u32 headroom;
 	u32 chunk_size_nohr;
+	u32 chunk_size;
 	struct user_struct *user;
 	unsigned long address;
 	refcount_t users;
@@ -152,6 +155,11 @@ static inline struct xdp_sock *__xsk_map_lookup_elem(struct bpf_map *map,
 
 	xs = READ_ONCE(m->xsk_map[key]);
 	return xs;
+}
+
+static inline u32 xdp_umem_get_rx_frame_size(struct xdp_umem *umem)
+{
+	return umem->chunk_size - umem->headroom - XDP_PACKET_HEADROOM;
 }
 
 static inline u64 xsk_umem_extract_addr(u64 addr)
@@ -295,6 +303,11 @@ static inline struct xdp_umem *xdp_get_umem_from_qid(struct net_device *dev,
 						     u16 queue_id)
 {
 	return NULL;
+}
+
+static inline u32 xdp_umem_get_rx_frame_size(struct xdp_umem *umem)
+{
+	return 0;
 }
 
 static inline u64 xsk_umem_extract_addr(u64 addr)

@@ -24,6 +24,7 @@
 #include <linux/rculist.h>
 #include <net/xdp_sock.h>
 #include <net/xdp.h>
+#include <net/xdp_sock_buff.h>
 
 #include "xsk_queue.h"
 #include "xdp_umem.h"
@@ -117,75 +118,66 @@ bool xsk_umem_uses_need_wakeup(struct xdp_umem *umem)
 }
 EXPORT_SYMBOL(xsk_umem_uses_need_wakeup);
 
-/* If a buffer crosses a page boundary, we need to do 2 memcpy's, one for
- * each page. This is only required in copy mode.
- */
-static void __xsk_rcv_memcpy(struct xdp_umem *umem, u64 addr, void *from_buf,
-			     u32 len, u32 metalen)
+static int __xsk_rcv_zc(struct xdp_sock *xs, struct xdp_buff *xdp, u32 len)
 {
-	void *to_buf = xdp_umem_get_data(umem, addr);
+	u64 addr;
+	int err;
 
-	addr = xsk_umem_add_offset_to_addr(addr);
-	if (xskq_cons_crosses_non_contig_pg(umem, addr, len + metalen)) {
-		void *next_pg_addr = umem->pages[(addr >> PAGE_SHIFT) + 1].addr;
-		u64 page_start = addr & ~(PAGE_SIZE - 1);
-		u64 first_len = PAGE_SIZE - (addr - page_start);
+	addr = xsk_buff_get_handle(xdp);
+	err = xskq_prod_reserve_desc(xs->rx, addr, len);
+	if (err) {
+		xs->rx_dropped++;
+		return err;
+	}
 
-		memcpy(to_buf, from_buf, first_len + metalen);
-		memcpy(next_pg_addr, from_buf + first_len, len - first_len);
+	xsk_buff_release(xdp);
+	return 0;
+}
 
-		return;
+static void xsk_copy_xdp(struct xdp_buff *to, struct xdp_buff *from, u32 len)
+{
+	void *from_buf, *to_buf;
+	u32 metalen;
+
+	if (unlikely(xdp_data_meta_unsupported(from))) {
+		from_buf = from->data;
+		to_buf = to->data;
+		metalen = 0;
+	} else {
+		from_buf = from->data_meta;
+		metalen = from->data - from->data_meta;
+		to_buf = to->data - metalen;
 	}
 
 	memcpy(to_buf, from_buf, len + metalen);
 }
 
-static int __xsk_rcv(struct xdp_sock *xs, struct xdp_buff *xdp, u32 len)
+static int __xsk_rcv(struct xdp_sock *xs, struct xdp_buff *xdp, u32 len,
+		     bool explicit_free)
 {
-	u64 offset = xs->umem->headroom;
-	u64 addr, memcpy_addr;
-	void *from_buf;
-	u32 metalen;
+	struct xdp_buff *xsk_xdp;
 	int err;
 
-	if (!xskq_cons_peek_addr(xs->umem->fq, &addr, xs->umem) ||
-	    len > xs->umem->chunk_size_nohr - XDP_PACKET_HEADROOM) {
+	if (len > xdp_umem_get_rx_frame_size(xs->umem)) {
 		xs->rx_dropped++;
 		return -ENOSPC;
 	}
 
-	if (unlikely(xdp_data_meta_unsupported(xdp))) {
-		from_buf = xdp->data;
-		metalen = 0;
-	} else {
-		from_buf = xdp->data_meta;
-		metalen = xdp->data - xdp->data_meta;
-	}
-
-	memcpy_addr = xsk_umem_adjust_offset(xs->umem, addr, offset);
-	__xsk_rcv_memcpy(xs->umem, memcpy_addr, from_buf, len, metalen);
-
-	offset += metalen;
-	addr = xsk_umem_adjust_offset(xs->umem, addr, offset);
-	err = xskq_prod_reserve_desc(xs->rx, addr, len);
-	if (!err) {
-		xskq_cons_release(xs->umem->fq);
-		xdp_return_buff(xdp);
-		return 0;
-	}
-
-	xs->rx_dropped++;
-	return err;
-}
-
-static int __xsk_rcv_zc(struct xdp_sock *xs, struct xdp_buff *xdp, u32 len)
-{
-	int err = xskq_prod_reserve_desc(xs->rx, xdp->handle, len);
-
-	if (err)
+	xsk_xdp = xsk_buff_alloc(xs->umem);
+	if (!xsk_xdp) {
 		xs->rx_dropped++;
+		return -ENOSPC;
+	}
 
-	return err;
+	xsk_copy_xdp(xsk_xdp, xdp, len);
+	err = __xsk_rcv_zc(xs, xsk_xdp, len);
+	if (err) {
+		xsk_buff_free(xsk_xdp);
+		return err;
+	}
+	if (explicit_free)
+		xdp_return_buff(xdp);
+	return 0;
 }
 
 static bool xsk_is_bound(struct xdp_sock *xs)
@@ -198,7 +190,8 @@ static bool xsk_is_bound(struct xdp_sock *xs)
 	return false;
 }
 
-static int xsk_rcv(struct xdp_sock *xs, struct xdp_buff *xdp)
+static int xsk_rcv(struct xdp_sock *xs, struct xdp_buff *xdp,
+		   bool explicit_free)
 {
 	u32 len;
 
@@ -210,8 +203,10 @@ static int xsk_rcv(struct xdp_sock *xs, struct xdp_buff *xdp)
 
 	len = xdp->data_end - xdp->data;
 
-	return (xdp->rxq->mem.type == MEM_TYPE_ZERO_COPY) ?
-		__xsk_rcv_zc(xs, xdp, len) : __xsk_rcv(xs, xdp, len);
+	return xdp->rxq->mem.type == MEM_TYPE_ZERO_COPY ||
+		xdp->rxq->mem.type == MEM_TYPE_XSK_BUFF_POOL ?
+		__xsk_rcv_zc(xs, xdp, len) :
+		__xsk_rcv(xs, xdp, len, explicit_free);
 }
 
 static void xsk_flush(struct xdp_sock *xs)
@@ -223,46 +218,11 @@ static void xsk_flush(struct xdp_sock *xs)
 
 int xsk_generic_rcv(struct xdp_sock *xs, struct xdp_buff *xdp)
 {
-	u32 metalen = xdp->data - xdp->data_meta;
-	u32 len = xdp->data_end - xdp->data;
-	u64 offset = xs->umem->headroom;
-	void *buffer;
-	u64 addr;
 	int err;
 
 	spin_lock_bh(&xs->rx_lock);
-
-	if (xs->dev != xdp->rxq->dev || xs->queue_id != xdp->rxq->queue_index) {
-		err = -EINVAL;
-		goto out_unlock;
-	}
-
-	if (!xskq_cons_peek_addr(xs->umem->fq, &addr, xs->umem) ||
-	    len > xs->umem->chunk_size_nohr - XDP_PACKET_HEADROOM) {
-		err = -ENOSPC;
-		goto out_drop;
-	}
-
-	addr = xsk_umem_adjust_offset(xs->umem, addr, offset);
-	buffer = xdp_umem_get_data(xs->umem, addr);
-	memcpy(buffer, xdp->data_meta, len + metalen);
-
-	addr = xsk_umem_adjust_offset(xs->umem, addr, metalen);
-	err = xskq_prod_reserve_desc(xs->rx, addr, len);
-	if (err)
-		goto out_drop;
-
-	xskq_cons_release(xs->umem->fq);
-	xskq_prod_submit(xs->rx);
-
-	spin_unlock_bh(&xs->rx_lock);
-
-	xs->sk.sk_data_ready(&xs->sk);
-	return 0;
-
-out_drop:
-	xs->rx_dropped++;
-out_unlock:
+	err = xsk_rcv(xs, xdp, false);
+	xsk_flush(xs);
 	spin_unlock_bh(&xs->rx_lock);
 	return err;
 }
@@ -272,7 +232,7 @@ int __xsk_map_redirect(struct xdp_sock *xs, struct xdp_buff *xdp)
 	struct list_head *flush_list = this_cpu_ptr(&xskmap_flush_list);
 	int err;
 
-	err = xsk_rcv(xs, xdp);
+	err = xsk_rcv(xs, xdp, true);
 	if (err)
 		return err;
 
@@ -403,7 +363,7 @@ static int xsk_generic_xmit(struct sock *sk)
 
 		skb_put(skb, len);
 		addr = desc.addr;
-		buffer = xdp_umem_get_data(xs->umem, addr);
+		buffer = xsk_buff_raw_get_data(xs->umem, addr);
 		err = skb_store_bits(skb, 0, buffer, len);
 		/* This is the backpreassure mechanism for the Tx path.
 		 * Reserve space in the completion queue and only proceed
@@ -859,6 +819,12 @@ static int xsk_setsockopt(struct socket *sock, int level, int optname,
 		q = (optname == XDP_UMEM_FILL_RING) ? &xs->umem->fq :
 			&xs->umem->cq;
 		err = xsk_init_queue(entries, q, true);
+		if (optname == XDP_UMEM_FILL_RING) {
+			if (xs->umem->unaligned_buff_pool)
+				xpu_set_fq(xs->umem->buff_pool, *q);
+			else
+				xp_set_fq(xs->umem->buff_pool, *q);
+		}
 		mutex_unlock(&xs->mutex);
 		return err;
 	}

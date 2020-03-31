@@ -15,6 +15,7 @@
 #include <linux/rtnetlink.h>
 #include <linux/idr.h>
 #include <linux/vmalloc.h>
+#include <net/xdp_sock_buff.h>
 
 #include "xdp_umem.h"
 #include "xsk_queue.h"
@@ -245,6 +246,10 @@ static void xdp_umem_release(struct xdp_umem *umem)
 	}
 
 	xsk_reuseq_destroy(umem);
+	if (umem->unaligned_buff_pool)
+		xpu_destroy(umem->buff_pool);
+	else
+		xp_destroy(umem->buff_pool);
 
 	xdp_umem_unmap_pages(umem);
 	xdp_umem_unpin_pages(umem);
@@ -392,6 +397,7 @@ static int xdp_umem_reg(struct xdp_umem *umem, struct xdp_umem_reg *mr)
 	umem->size = size;
 	umem->headroom = headroom;
 	umem->chunk_size_nohr = chunk_size - headroom;
+	umem->chunk_size = chunk_size;
 	umem->npgs = size / PAGE_SIZE;
 	umem->pgs = NULL;
 	umem->user = NULL;
@@ -417,11 +423,25 @@ static int xdp_umem_reg(struct xdp_umem *umem, struct xdp_umem_reg *mr)
 	}
 
 	err = xdp_umem_map_pages(umem);
-	if (!err)
-		return 0;
+	if (err)
+		goto out_pages;
 
+	umem->unaligned_buff_pool = unaligned_chunks;
+	umem->buff_pool = unaligned_chunks ?
+			  (void *)xpu_create(umem->pgs, umem->npgs, chunks,
+					     chunk_size, headroom) :
+			  (void *)xp_create(umem->pgs, umem->npgs, chunks,
+					    chunk_size, headroom);
+	if (!umem->buff_pool) {
+		err = -ENOMEM;
+		goto out_unmap;
+	}
+	return 0;
+
+out_unmap:
+	xdp_umem_unmap_pages(umem);
+out_pages:
 	kvfree(umem->pages);
-
 out_pin:
 	xdp_umem_unpin_pages(umem);
 out_account:
