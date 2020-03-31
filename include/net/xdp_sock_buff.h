@@ -66,23 +66,15 @@ static inline void xsk_buff_free(struct xdp_buff *xdp)
 
 static inline void xsk_buff_release(struct xdp_buff *xdp)
 {
-	struct xdp_buff_base *b;
+	struct xdp_buff_base *b = (struct xdp_buff_base *)xdp;
 
-	if (xdp->rxq && xdp->rxq->mem.type == MEM_TYPE_ZERO_COPY)
-		return;
-
-	b = (struct xdp_buff_base *)xdp;
 	b->unaligned ? xpu_release(b->pool, xdp) : xp_release(b->pool, xdp);
 }
 
 static inline u64 xsk_buff_get_handle(struct xdp_buff *xdp)
 {
-	struct xdp_buff_base *b;
+	struct xdp_buff_base *b = (struct xdp_buff_base *)xdp;
 
-	if (xdp->rxq && xdp->rxq->mem.type == MEM_TYPE_ZERO_COPY)
-		return xdp->handle;
-
-	b = (struct xdp_buff_base *)xdp;
 	return b->unaligned ? xpu_get_handle(b->pool, xdp) :
 		xp_get_handle(b->pool, xdp);
 }

@@ -30,7 +30,6 @@ struct xdp_umem_ring {
 };
 
 struct xsk_queue {
-	u64 chunk_mask;
 	u64 size;
 	u32 ring_mask;
 	u32 nentries;
@@ -104,35 +103,6 @@ struct xsk_queue {
 
 /* Functions that read and validate content from consumer rings. */
 
-static inline bool xskq_cons_crosses_non_contig_pg(struct xdp_umem *umem,
-						   u64 addr,
-						   u64 length)
-{
-	bool cross_pg = (addr & (PAGE_SIZE - 1)) + length > PAGE_SIZE;
-	bool next_pg_contig =
-		(unsigned long)umem->pages[(addr >> PAGE_SHIFT)].addr &
-			XSK_NEXT_PG_CONTIG_MASK;
-
-	return cross_pg && !next_pg_contig;
-}
-
-static inline bool xskq_cons_is_valid_unaligned(struct xsk_queue *q,
-						u64 addr,
-						u64 length,
-						struct xdp_umem *umem)
-{
-	u64 base_addr = xsk_umem_extract_addr(addr);
-
-	addr = xsk_umem_add_offset_to_addr(addr);
-	if (base_addr >= q->size || addr >= q->size ||
-	    xskq_cons_crosses_non_contig_pg(umem, addr, length)) {
-		q->invalid_descs++;
-		return false;
-	}
-
-	return true;
-}
-
 static inline bool xskq_cons_is_valid_addr(struct xsk_queue *q, u64 addr)
 {
 	if (addr >= q->size) {
@@ -141,34 +111,6 @@ static inline bool xskq_cons_is_valid_addr(struct xsk_queue *q, u64 addr)
 	}
 
 	return true;
-}
-
-static inline bool xskq_cons_read_addr(struct xsk_queue *q, u64 *addr,
-				       struct xdp_umem *umem)
-{
-	struct xdp_umem_ring *ring = (struct xdp_umem_ring *)q->ring;
-
-	while (q->cached_cons != q->cached_prod) {
-		u32 idx = q->cached_cons & q->ring_mask;
-
-		*addr = ring->desc[idx] & q->chunk_mask;
-
-		if (umem->flags & XDP_UMEM_UNALIGNED_CHUNK_FLAG) {
-			if (xskq_cons_is_valid_unaligned(q, *addr,
-							 umem->chunk_size_nohr,
-							 umem))
-				return true;
-			goto out;
-		}
-
-		if (xskq_cons_is_valid_addr(q, *addr))
-			return true;
-
-out:
-		q->cached_cons++;
-	}
-
-	return false;
 }
 
 static inline bool xskq_cons_read_addr_aligned(struct xsk_queue *q, u64 *addr)
@@ -263,14 +205,6 @@ static inline bool xskq_cons_has_entries(struct xsk_queue *q, u32 cnt)
 	entries = q->cached_prod - q->cached_cons;
 
 	return entries >= cnt;
-}
-
-static inline bool xskq_cons_peek_addr(struct xsk_queue *q, u64 *addr,
-				       struct xdp_umem *umem)
-{
-	if (q->cached_prod == q->cached_cons)
-		xskq_cons_get_entries(q);
-	return xskq_cons_read_addr(q, addr, umem);
 }
 
 static inline bool xskq_cons_peek_addr_aligned(struct xsk_queue *q, u64 *addr)
@@ -408,11 +342,8 @@ static inline u64 xskq_nb_invalid_descs(struct xsk_queue *q)
 	return q ? q->invalid_descs : 0;
 }
 
-void xskq_set_umem(struct xsk_queue *q, u64 size, u64 chunk_mask);
+void xskq_set_umem(struct xsk_queue *q, u64 size);
 struct xsk_queue *xskq_create(u32 nentries, bool umem_queue);
 void xskq_destroy(struct xsk_queue *q_ops);
-
-/* Executed by the core when the entire UMEM gets freed */
-void xsk_reuseq_destroy(struct xdp_umem *umem);
 
 #endif /* _LINUX_XSK_QUEUE_H */
