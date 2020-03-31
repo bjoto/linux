@@ -400,6 +400,7 @@ struct i40e_ring {
 	};
 
 	unsigned int size;		/* length of descriptor ring in bytes */
+	unsigned int bi_size;
 	dma_addr_t dma;			/* physical address of ring */
 
 	struct i40e_vsi *vsi;		/* Backreference to associated VSI */
