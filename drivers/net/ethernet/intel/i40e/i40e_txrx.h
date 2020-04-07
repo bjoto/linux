@@ -340,7 +340,7 @@ enum i40e_ring_state_t {
 #define I40E_RX_SPLIT_TCP_UDP 0x4
 #define I40E_RX_SPLIT_SCTP    0x8
 
-#define I40E_STAGE_SIZE 64
+#define I40E_STAGE_SIZE 256
 
 /* struct that defines a descriptor ring, associated with a VSI */
 struct i40e_ring {
