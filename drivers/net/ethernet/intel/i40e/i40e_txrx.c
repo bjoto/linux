@@ -1593,21 +1593,17 @@ no_buffers:
  * @skb: skb currently being received and modified
  * @rx_desc: the receive descriptor
  **/
-static inline void i40e_rx_checksum(struct i40e_vsi *vsi,
-				    struct sk_buff *skb,
-				    union i40e_rx_desc *rx_desc)
+static void i40e_rx_checksum(struct i40e_vsi *vsi, struct sk_buff *skb, u64 qw1)
 {
 	struct i40e_rx_ptype_decoded decoded;
 	u32 rx_error, rx_status;
 	bool ipv4, ipv6;
 	u8 ptype;
-	u64 qword;
 
-	qword = le64_to_cpu(rx_desc->wb.qword1.status_error_len);
-	ptype = (qword & I40E_RXD_QW1_PTYPE_MASK) >> I40E_RXD_QW1_PTYPE_SHIFT;
-	rx_error = (qword & I40E_RXD_QW1_ERROR_MASK) >>
+	ptype = (qw1 & I40E_RXD_QW1_PTYPE_MASK) >> I40E_RXD_QW1_PTYPE_SHIFT;
+	rx_error = (qw1 & I40E_RXD_QW1_ERROR_MASK) >>
 		   I40E_RXD_QW1_ERROR_SHIFT;
-	rx_status = (qword & I40E_RXD_QW1_STATUS_MASK) >>
+	rx_status = (qw1 & I40E_RXD_QW1_STATUS_MASK) >>
 		    I40E_RXD_QW1_STATUS_SHIFT;
 	decoded = decode_rx_desc_ptype(ptype);
 
@@ -1708,21 +1704,20 @@ static inline int i40e_ptype_to_htype(u8 ptype)
  * @skb: skb currently being received and modified
  * @rx_ptype: Rx packet type
  **/
-static inline void i40e_rx_hash(struct i40e_ring *ring,
-				union i40e_rx_desc *rx_desc,
-				struct sk_buff *skb,
-				u8 rx_ptype)
+static void i40e_rx_hash(struct i40e_ring *ring, u64 qw0_raw, u64 qw1,
+			 struct sk_buff *skb, u8 rx_ptype)
 {
-	u32 hash;
+	struct i40e_32b_rx_wb_qw0 *qw0 = (struct i40e_32b_rx_wb_qw0 *)&qw0_raw;
 	const __le64 rss_mask =
 		cpu_to_le64((u64)I40E_RX_DESC_FLTSTAT_RSS_HASH <<
 			    I40E_RX_DESC_STATUS_FLTSTAT_SHIFT);
+	u32 hash;
 
 	if (!(ring->netdev->features & NETIF_F_RXHASH))
 		return;
 
-	if ((rx_desc->wb.qword1.status_error_len & rss_mask) == rss_mask) {
-		hash = le32_to_cpu(rx_desc->wb.qword0.hi_dword.rss);
+	if ((qw1 & rss_mask) == rss_mask) {
+		hash = le32_to_cpu(qw0->hi_dword.rss);
 		skb_set_hash(skb, hash, i40e_ptype_to_htype(rx_ptype));
 	}
 }
@@ -1738,29 +1733,29 @@ static inline void i40e_rx_hash(struct i40e_ring *ring,
  * order to populate the hash, checksum, VLAN, protocol, and
  * other fields within the skb.
  **/
-void i40e_process_skb_fields(struct i40e_ring *rx_ring,
-			     union i40e_rx_desc *rx_desc, struct sk_buff *skb)
+void i40e_process_skb_fields(struct i40e_ring *rx_ring, u64 qw0_raw, u64 qw1,
+			     struct sk_buff *skb)
 {
-	u64 qword = le64_to_cpu(rx_desc->wb.qword1.status_error_len);
-	u32 rx_status = (qword & I40E_RXD_QW1_STATUS_MASK) >>
+	struct i40e_32b_rx_wb_qw0 *qw0 = (struct i40e_32b_rx_wb_qw0 *)&qw0_raw;
+	u32 rx_status = (qw1 & I40E_RXD_QW1_STATUS_MASK) >>
 			I40E_RXD_QW1_STATUS_SHIFT;
 	u32 tsynvalid = rx_status & I40E_RXD_QW1_STATUS_TSYNVALID_MASK;
 	u32 tsyn = (rx_status & I40E_RXD_QW1_STATUS_TSYNINDX_MASK) >>
 		   I40E_RXD_QW1_STATUS_TSYNINDX_SHIFT;
-	u8 rx_ptype = (qword & I40E_RXD_QW1_PTYPE_MASK) >>
+	u8 rx_ptype = (qw1 & I40E_RXD_QW1_PTYPE_MASK) >>
 		      I40E_RXD_QW1_PTYPE_SHIFT;
 
 	if (unlikely(tsynvalid))
 		i40e_ptp_rx_hwtstamp(rx_ring->vsi->back, skb, tsyn);
 
-	i40e_rx_hash(rx_ring, rx_desc, skb, rx_ptype);
+	i40e_rx_hash(rx_ring, qw0_raw, qw1, skb, rx_ptype);
 
-	i40e_rx_checksum(rx_ring->vsi, skb, rx_desc);
+	i40e_rx_checksum(rx_ring->vsi, skb, qw1);
 
 	skb_record_rx_queue(skb, rx_ring->queue_index);
 
-	if (qword & BIT(I40E_RX_DESC_STATUS_L2TAG1P_SHIFT)) {
-		u16 vlan_tag = rx_desc->wb.qword0.lo_dword.l2tag1;
+	if (qw1 & BIT(I40E_RX_DESC_STATUS_L2TAG1P_SHIFT)) {
+		u16 vlan_tag = qw0->lo_dword.l2tag1;
 
 		__vlan_hwaccel_put_tag(skb, htons(ETH_P_8021Q),
 				       le16_to_cpu(vlan_tag));
@@ -2408,7 +2403,8 @@ static int i40e_clean_rx_irq(struct i40e_ring *rx_ring, int budget)
 		total_rx_bytes += skb->len;
 
 		/* populate checksum, VLAN, and protocol */
-		i40e_process_skb_fields(rx_ring, rx_desc, skb);
+		i40e_process_skb_fields(rx_ring, rx_desc->raw.qword[0], qword,
+					skb);
 
 		i40e_trace(clean_rx_irq_rx, rx_ring, rx_desc, skb);
 		napi_gro_receive(&rx_ring->q_vector->napi, skb);

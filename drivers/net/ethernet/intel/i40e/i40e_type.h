@@ -706,7 +706,7 @@ union i40e_32byte_rx_desc {
 				__le32 fd_id;
 			} hi_dword;
 		} qword0;
-		struct {
+		struct i40e_32b_rx_wb_qw1 {
 			/* status/error/pktype/length */
 			__le64 status_error_len;
 		} qword1;

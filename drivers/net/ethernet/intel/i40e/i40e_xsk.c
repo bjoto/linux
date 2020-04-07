@@ -393,7 +393,8 @@ int i40e_clean_rx_irq_zc(struct i40e_ring *rx_ring, int budget)
 		total_rx_bytes += skb->len;
 		total_rx_packets++;
 
-		i40e_process_skb_fields(rx_ring, rx_desc, skb);
+		i40e_process_skb_fields(rx_ring, rx_desc->raw.qword[0], qword,
+					skb);
 		napi_gro_receive(&rx_ring->q_vector->napi, skb);
 	}
 
