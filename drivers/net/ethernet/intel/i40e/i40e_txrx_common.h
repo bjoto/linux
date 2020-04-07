@@ -9,11 +9,9 @@ void i40e_clean_programming_status(struct i40e_ring *rx_ring, u64 qword0_raw,
 				   u64 qword1);
 void i40e_process_skb_fields(struct i40e_ring *rx_ring, u64 qw0_raw, u64 qw1,
 			     struct sk_buff *skb);
-void i40e_xdp_ring_update_tail(struct i40e_ring *xdp_ring);
 void i40e_update_rx_stats(struct i40e_ring *rx_ring,
 			  unsigned int total_rx_bytes,
 			  unsigned int total_rx_packets);
-void i40e_finalize_xdp_rx(struct i40e_ring *rx_ring, unsigned int xdp_res);
 void i40e_release_rx_desc(struct i40e_ring *rx_ring, u32 val);
 
 #define I40E_XDP_PASS		0
@@ -97,6 +95,44 @@ static inline bool i40e_rx_is_programming_status(u64 qword1)
 	 * programming status descriptor.
 	 */
 	return qword1 & I40E_RXD_QW1_LENGTH_SPH_MASK;
+}
+
+/**
+ * i40e_xdp_ring_update_tail - Updates the XDP Tx ring tail register
+ * @xdp_ring: XDP Tx ring
+ *
+ * This function updates the XDP Tx ring tail register.
+ **/
+static inline void i40e_xdp_ring_update_tail(struct i40e_ring *xdp_ring)
+{
+	/* Force memory writes to complete before letting h/w
+	 * know there are new descriptors to fetch.
+	 */
+	wmb();
+	writel_relaxed(xdp_ring->next_to_use, xdp_ring->tail);
+}
+
+/**
+ * i40e_finalize_xdp_rx - Bump XDP Tx tail and/or flush redirect map
+ * @rx_ring: Rx ring
+ * @xdp_res: Result of the receive batch
+ *
+ * This function bumps XDP Tx tail and/or flush redirect map, and
+ * should be called when a batch of packets has been processed in the
+ * napi loop.
+ **/
+static inline void i40e_finalize_xdp_rx(struct i40e_ring *rx_ring,
+					unsigned int xdp_res)
+{
+	if (xdp_res & I40E_XDP_REDIR)
+		xdp_do_flush();
+
+	if (xdp_res & I40E_XDP_TX) {
+		struct i40e_ring *xdp_ring =
+			rx_ring->vsi->xdp_rings[rx_ring->queue_index];
+
+		i40e_xdp_ring_update_tail(xdp_ring);
+	}
 }
 
 void i40e_xsk_clean_rx_ring(struct i40e_ring *rx_ring);

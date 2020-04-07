@@ -340,6 +340,8 @@ enum i40e_ring_state_t {
 #define I40E_RX_SPLIT_TCP_UDP 0x4
 #define I40E_RX_SPLIT_SCTP    0x8
 
+#define I40E_STAGE_SIZE 64
+
 /* struct that defines a descriptor ring, associated with a VSI */
 struct i40e_ring {
 	struct i40e_ring *next;		/* pointer to next ring in q_vector */
@@ -412,6 +414,8 @@ struct i40e_ring {
 	struct i40e_channel *ch;
 	struct xdp_rxq_info xdp_rxq;
 	struct xdp_umem *xsk_umem;
+	struct xdp_buff *rx_bi_stage[I40E_STAGE_SIZE];
+	u64 qw_stage[I40E_STAGE_SIZE * 2];
 } ____cacheline_internodealigned_in_smp;
 
 static inline bool ring_uses_build_skb(struct i40e_ring *ring)

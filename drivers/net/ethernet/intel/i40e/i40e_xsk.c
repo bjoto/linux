@@ -224,33 +224,6 @@ no_buffers:
 	return ok;
 }
 
-
-/**
- * i40e_get_rx_buffer_zc - Return the current Rx buffer
- * @rx_ring: Rx ring
- * @size: The size of the rx buffer (read from descriptor)
- *
- * This function returns the current, received Rx buffer, and also
- * does DMA synchronization.  the Rx ring.
- *
- * Returns the received Rx buffer
- **/
-static struct xdp_buff **i40e_get_rx_buffer_zc(struct i40e_ring *rx_ring,
-					       const unsigned int size)
-{
-	struct xdp_buff **bi;
-	dma_addr_t dma;
-
-	bi = i40e_rx_bi(rx_ring, rx_ring->next_to_clean);
-	dma = xsk_buff_xdp_get_dma(rx_ring->xsk_umem, *bi);
-
-	/* we are reusing so sync this buffer for CPU use */
-	dma_sync_single_range_for_cpu(rx_ring->dev, dma, 0, size,
-				      DMA_BIDIRECTIONAL);
-
-	return bi;
-}
-
 /**
  * i40e_construct_skb_zc - Create skbufff from zero-copy Rx buffer
  * @rx_ring: Rx ring
@@ -284,17 +257,143 @@ static struct sk_buff *i40e_construct_skb_zc(struct i40e_ring *rx_ring,
 	return skb;
 }
 
-/**
- * i40e_inc_ntc: Advance the next_to_clean index
- * @rx_ring: Rx ring
- **/
-static void i40e_inc_ntc(struct i40e_ring *rx_ring)
+static unsigned int i40e_rx_wb_qw1_size(u64 qw1)
 {
-	u32 ntc = rx_ring->next_to_clean + 1;
+	return (qw1 & I40E_RXD_QW1_LENGTH_PBUF_MASK) >>
+		I40E_RXD_QW1_LENGTH_PBUF_SHIFT;
+}
 
-	ntc = (ntc < rx_ring->count) ? ntc : 0;
+static bool i40e_rx_wb_qw1_is_dd(u64 qw1)
+{
+	return !!(qw1 & BIT(I40E_RX_DESC_STATUS_DD_SHIFT));
+
+}
+
+static int i40e_rx_stage(struct i40e_ring *rx_ring)
+{
+	struct xdp_buff **bis, **rxbi;
+	union i40e_rx_desc *desc;
+	u64 *qws, qw1;
+	int i = 0;
+	u32 ntc;
+
+	qws = &rx_ring->qw_stage[0];
+	bis = &rx_ring->rx_bi_stage[0];
+	ntc = rx_ring->next_to_clean;
+	rxbi = i40e_rx_bi(rx_ring, ntc);
+	desc = I40E_RX_DESC(rx_ring, ntc);
+
+	while (i < I40E_STAGE_SIZE) {
+		qw1 = le64_to_cpu(desc->raw.qword[1]);
+		if (!i40e_rx_wb_qw1_is_dd(qw1))
+			break;
+
+		qws[0] = desc->raw.qword[0];
+		qws[1] = qw1;
+		*bis = *rxbi;
+		*rxbi = NULL;
+
+		qws += 2;
+		bis++;
+		rxbi++;
+		desc++;
+		ntc++;
+		i++;
+		if (ntc >= rx_ring->count) {
+			ntc = 0;
+			rxbi = i40e_rx_bi(rx_ring, ntc);
+			desc = I40E_RX_DESC(rx_ring, ntc);
+		}
+	}
 	rx_ring->next_to_clean = ntc;
-	prefetch(I40E_RX_DESC(rx_ring, ntc));
+	return i;
+}
+
+static bool i40e_rx_alloc(struct i40e_ring *rx_ring)
+{
+	u16 unused = I40E_DESC_UNUSED(rx_ring);
+
+	if (unused >= I40E_RX_BUFFER_WRITE)
+		return i40e_alloc_rx_buffers_zc(rx_ring, unused);
+	return true;
+}
+
+static void i40e_rx_sync_dma(struct i40e_ring *rx_ring, struct xdp_buff *xdp)
+{
+	unsigned int size;
+	dma_addr_t dma;
+
+	size = xdp->data_end - xdp->data;
+	dma = xsk_buff_xdp_get_dma(rx_ring->xsk_umem, xdp);
+	dma_sync_single_range_for_cpu(rx_ring->dev, dma, 0, size,
+				      DMA_BIDIRECTIONAL);
+
+}
+
+static void i40e_rx_process(struct i40e_ring *rx_ring, int staged)
+{
+	unsigned int total_rx_bytes = 0, xdp_res, xdp_xmit = 0, size;
+	struct xdp_buff **bis, *xdp;
+	struct sk_buff *skb;
+	u64 *qws, qw0, qw1;
+	int i;
+
+	/* This memory barrier is needed to keep us from reading any
+	 * other fields out of the rx_desc until we have verified the
+	 * descriptor has been written back.
+	 */
+	dma_rmb();
+
+	bis = &rx_ring->rx_bi_stage[0];
+	qws = &rx_ring->qw_stage[0];
+
+	for (i = 0; i < staged; i++) {
+		xdp = *bis++;
+		qw0 = *qws++;
+		qw1 = *qws++;
+
+		if (i40e_rx_is_programming_status(qw1)) {
+			i40e_clean_programming_status(rx_ring, qw0, qw1);
+			xsk_buff_free(xdp);
+			continue;
+		}
+
+		size = i40e_rx_wb_qw1_size(qw1);
+		xdp->data_end = xdp->data + size;
+		i40e_rx_sync_dma(rx_ring, xdp);
+		total_rx_bytes += size;
+
+		xdp_res = i40e_run_xdp_zc(rx_ring, xdp);
+		if (xdp_res) {
+			if (xdp_res & (I40E_XDP_TX | I40E_XDP_REDIR))
+				xdp_xmit |= xdp_res;
+			else
+				xsk_buff_free(xdp);
+			continue;
+		}
+
+		/* XDP_PASS path */
+
+		/* NB! We are not checking for errors using
+		 * i40e_test_staterr with
+		 * BIT(I40E_RXD_QW1_ERROR_SHIFT). This is due to that
+		 * SBP is *not* set in PRT_SBPVSI (default not set).
+		 */
+		skb = i40e_construct_skb_zc(rx_ring, xdp);
+		if (!skb) {
+			rx_ring->rx_stats.alloc_buff_failed++;
+			break;
+		}
+
+		if (eth_skb_pad(skb))
+			continue;
+
+		i40e_process_skb_fields(rx_ring, qw0, qw1, skb);
+		napi_gro_receive(&rx_ring->q_vector->napi, skb);
+	}
+
+	i40e_finalize_xdp_rx(rx_ring, xdp_xmit);
+	i40e_update_rx_stats(rx_ring, total_rx_bytes, staged);
 }
 
 /**
@@ -306,110 +405,21 @@ static void i40e_inc_ntc(struct i40e_ring *rx_ring)
  **/
 int i40e_clean_rx_irq_zc(struct i40e_ring *rx_ring, int budget)
 {
-	unsigned int total_rx_bytes = 0, total_rx_packets = 0;
-	u16 cleaned_count = I40E_DESC_UNUSED(rx_ring);
-	unsigned int xdp_res, xdp_xmit = 0;
-	bool failure = false;
-	struct sk_buff *skb;
+	int staged;
+	bool fail;
 
-	while (likely(total_rx_packets < (unsigned int)budget)) {
-		union i40e_rx_desc *rx_desc;
-		struct xdp_buff **bi;
-		unsigned int size;
-		u64 qword;
-
-		if (cleaned_count >= I40E_RX_BUFFER_WRITE) {
-			failure = failure ||
-				  !i40e_alloc_rx_buffers_zc(rx_ring,
-							    cleaned_count);
-			cleaned_count = 0;
-		}
-
-		rx_desc = I40E_RX_DESC(rx_ring, rx_ring->next_to_clean);
-		qword = le64_to_cpu(rx_desc->wb.qword1.status_error_len);
-
-		/* This memory barrier is needed to keep us from reading
-		 * any other fields out of the rx_desc until we have
-		 * verified the descriptor has been written back.
-		 */
-		dma_rmb();
-
-		if (i40e_rx_is_programming_status(qword)) {
-			i40e_clean_programming_status(rx_ring,
-						      rx_desc->raw.qword[0],
-						      qword);
-			bi = i40e_rx_bi(rx_ring, rx_ring->next_to_clean);
-			xsk_buff_free(*bi);
-			*bi = NULL;
-			i40e_inc_ntc(rx_ring);
-			continue;
-		}
-
-		bi = i40e_rx_bi(rx_ring, rx_ring->next_to_clean);
-		size = (qword & I40E_RXD_QW1_LENGTH_PBUF_MASK) >>
-		       I40E_RXD_QW1_LENGTH_PBUF_SHIFT;
-		if (!size)
-			break;
-
-		bi = i40e_get_rx_buffer_zc(rx_ring, size);
-		(*bi)->data_end = (*bi)->data + size;
-
-		xdp_res = i40e_run_xdp_zc(rx_ring, *bi);
-		if (xdp_res) {
-			if (xdp_res & (I40E_XDP_TX | I40E_XDP_REDIR))
-				xdp_xmit |= xdp_res;
-			else
-				xsk_buff_free(*bi);
-
-			*bi = NULL;
-			total_rx_bytes += size;
-			total_rx_packets++;
-
-			cleaned_count++;
-			i40e_inc_ntc(rx_ring);
-			continue;
-		}
-
-		/* XDP_PASS path */
-
-		/* NB! We are not checking for errors using
-		 * i40e_test_staterr with
-		 * BIT(I40E_RXD_QW1_ERROR_SHIFT). This is due to that
-		 * SBP is *not* set in PRT_SBPVSI (default not set).
-		 */
-		skb = i40e_construct_skb_zc(rx_ring, *bi);
-		*bi = NULL;
-		if (!skb) {
-			rx_ring->rx_stats.alloc_buff_failed++;
-			break;
-		}
-
-		cleaned_count++;
-		i40e_inc_ntc(rx_ring);
-
-		if (eth_skb_pad(skb))
-			continue;
-
-		total_rx_bytes += skb->len;
-		total_rx_packets++;
-
-		i40e_process_skb_fields(rx_ring, rx_desc->raw.qword[0], qword,
-					skb);
-		napi_gro_receive(&rx_ring->q_vector->napi, skb);
-	}
-
-	i40e_finalize_xdp_rx(rx_ring, xdp_xmit);
-	i40e_update_rx_stats(rx_ring, total_rx_bytes, total_rx_packets);
+	staged = i40e_rx_stage(rx_ring);
+	fail = !i40e_rx_alloc(rx_ring);
+	i40e_rx_process(rx_ring, staged);
 
 	if (xsk_umem_uses_need_wakeup(rx_ring->xsk_umem)) {
-		if (failure || rx_ring->next_to_clean == rx_ring->next_to_use)
+		if (fail || rx_ring->next_to_clean == rx_ring->next_to_use)
 			xsk_set_rx_need_wakeup(rx_ring->xsk_umem);
 		else
 			xsk_clear_rx_need_wakeup(rx_ring->xsk_umem);
-
-		return (int)total_rx_packets;
+		return staged;
 	}
-	return failure ? budget : (int)total_rx_packets;
+	return fail ? budget : staged;
 }
 
 /**

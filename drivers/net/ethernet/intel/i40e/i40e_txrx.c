@@ -2217,21 +2217,6 @@ static void i40e_rx_buffer_flip(struct i40e_ring *rx_ring,
 }
 
 /**
- * i40e_xdp_ring_update_tail - Updates the XDP Tx ring tail register
- * @xdp_ring: XDP Tx ring
- *
- * This function updates the XDP Tx ring tail register.
- **/
-void i40e_xdp_ring_update_tail(struct i40e_ring *xdp_ring)
-{
-	/* Force memory writes to complete before letting h/w
-	 * know there are new descriptors to fetch.
-	 */
-	wmb();
-	writel_relaxed(xdp_ring->next_to_use, xdp_ring->tail);
-}
-
-/**
  * i40e_update_rx_stats - Update Rx ring statistics
  * @rx_ring: rx descriptor ring
  * @total_rx_bytes: number of bytes received
@@ -2249,28 +2234,6 @@ void i40e_update_rx_stats(struct i40e_ring *rx_ring,
 	u64_stats_update_end(&rx_ring->syncp);
 	rx_ring->q_vector->rx.total_packets += total_rx_packets;
 	rx_ring->q_vector->rx.total_bytes += total_rx_bytes;
-}
-
-/**
- * i40e_finalize_xdp_rx - Bump XDP Tx tail and/or flush redirect map
- * @rx_ring: Rx ring
- * @xdp_res: Result of the receive batch
- *
- * This function bumps XDP Tx tail and/or flush redirect map, and
- * should be called when a batch of packets has been processed in the
- * napi loop.
- **/
-void i40e_finalize_xdp_rx(struct i40e_ring *rx_ring, unsigned int xdp_res)
-{
-	if (xdp_res & I40E_XDP_REDIR)
-		xdp_do_flush_map();
-
-	if (xdp_res & I40E_XDP_TX) {
-		struct i40e_ring *xdp_ring =
-			rx_ring->vsi->xdp_rings[rx_ring->queue_index];
-
-		i40e_xdp_ring_update_tail(xdp_ring);
-	}
 }
 
 /**
