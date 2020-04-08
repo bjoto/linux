@@ -442,9 +442,8 @@ static bool i40e_xmit_zc(struct i40e_ring *xdp_ring, unsigned int budget)
 			break;
 
 		dma = xsk_buff_raw_get_dma(xdp_ring->xsk_umem, desc.addr);
-
-		dma_sync_single_for_device(xdp_ring->dev, dma, desc.len,
-					   DMA_BIDIRECTIONAL);
+		xsk_buff_raw_dma_sync_for_device(xdp_ring->xsk_umem, dma,
+						 desc.len);
 
 		tx_bi = &xdp_ring->tx_bi[xdp_ring->next_to_use];
 		tx_bi->bytecount = desc.len;
