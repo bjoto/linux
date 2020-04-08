@@ -196,10 +196,8 @@ bool i40e_alloc_rx_buffers_zc(struct i40e_ring *rx_ring, u16 count)
 		}
 		*bi = xdp;
 		dma = xsk_buff_xdp_get_dma(rx_ring->xsk_umem, xdp);
-
-		dma_sync_single_range_for_device(rx_ring->dev, dma, 0,
-						 rx_ring->rx_buf_len,
-						 DMA_BIDIRECTIONAL);
+		xsk_buff_dma_sync_for_device(rx_ring->xsk_umem, xdp,
+					     rx_ring->rx_buf_len);
 
 		rx_desc->read.pkt_addr = cpu_to_le64(dma);
 		rx_desc->read.hdr_addr = 0;
@@ -321,13 +319,9 @@ static bool i40e_rx_alloc(struct i40e_ring *rx_ring)
 static void i40e_rx_sync_dma(struct i40e_ring *rx_ring, struct xdp_buff *xdp)
 {
 	unsigned int size;
-	dma_addr_t dma;
 
 	size = xdp->data_end - xdp->data;
-	dma = xsk_buff_xdp_get_dma(rx_ring->xsk_umem, xdp);
-	dma_sync_single_range_for_cpu(rx_ring->dev, dma, 0, size,
-				      DMA_BIDIRECTIONAL);
-
+	xsk_buff_dma_sync_for_cpu(rx_ring->xsk_umem, xdp, size);
 }
 
 static void i40e_rx_process(struct i40e_ring *rx_ring, int staged)
