@@ -103,9 +103,11 @@ static inline void xsk_buff_dma_sync_for_device(struct xdp_umem *umem,
 						struct xdp_buff *xdp,
 						size_t size)
 {
+	dma_addr_t dma = ((struct xdp_buff_base *)xdp)->dma;
+
 	return umem->unaligned_buff_pool ?
-		xpu_dma_sync_for_device(umem->buff_pool, xdp, size) :
-		xp_dma_sync_for_device(umem->buff_pool, xdp, size);
+		xpu_dma_sync_for_device(umem->buff_pool, dma, size) :
+		xp_dma_sync_for_device(umem->buff_pool, dma, size);
 }
 
 static inline void xsk_buff_dma_sync_for_cpu(struct xdp_umem *umem,
@@ -115,6 +117,15 @@ static inline void xsk_buff_dma_sync_for_cpu(struct xdp_umem *umem,
 	return umem->unaligned_buff_pool ?
 		xpu_dma_sync_for_cpu(umem->buff_pool, xdp, size) :
 		xp_dma_sync_for_cpu(umem->buff_pool, xdp, size);
+}
+
+static inline void xsk_buff_raw_dma_sync_for_device(struct xdp_umem *umem,
+						    dma_addr_t dma,
+						    size_t size)
+{
+	return umem->unaligned_buff_pool ?
+		xpu_dma_sync_for_device(umem->buff_pool, dma, size) :
+		xp_dma_sync_for_device(umem->buff_pool, dma, size);
 }
 
 #endif /* XDP_SOCK_BUFF_H_ */

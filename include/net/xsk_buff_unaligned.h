@@ -95,14 +95,12 @@ bool xpu_validate_desc(struct xsk_buff_pool_unaligned *xp,
 		       struct xdp_desc *desc);
 
 static inline void xpu_dma_sync_for_device(struct xsk_buff_pool_unaligned *xpu,
-					  struct xdp_buff *xdp, size_t size)
+					   dma_addr_t dma, size_t size)
 {
-	struct xdp_buff_xpu *buff = (struct xdp_buff_xpu *)xdp;
-
 	if (xpu->cheap_dma)
 		return;
 
-	dma_sync_single_range_for_device(xpu->dev, buff->dma, 0,
+	dma_sync_single_range_for_device(xpu->dev, dma, 0,
 					 size, DMA_BIDIRECTIONAL);
 }
 
