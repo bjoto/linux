@@ -119,6 +119,7 @@ void xpu_dma_unmap(struct xsk_buff_pool_unaligned *xpu, struct device *dev,
 
 	kvfree(xpu->dma_pages);
 	xpu->dma_pages_size = 0;
+	xpu->dev = NULL;
 }
 EXPORT_SYMBOL(xpu_dma_unmap);
 
@@ -145,6 +146,9 @@ int xpu_dma_map(struct xsk_buff_pool_unaligned *xpu, struct device *dev,
 	}
 
 	xpu_check_page_contiguity(xpu);
+	// XXX
+	xpu->cheap_dma = true;
+	xpu->dev = dev;
 	return 0;
 }
 EXPORT_SYMBOL(xpu_dma_map);

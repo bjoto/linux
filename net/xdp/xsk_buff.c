@@ -1,4 +1,6 @@
 #include <net/xsk_buff.h>
+#include <linux/dma-noncoherent.h>
+#include <linux/dma-direct.h>
 #include "xsk_queue.h"
 
 static void xp_addr_unmap(struct xsk_buff_pool *xp)
@@ -114,8 +116,36 @@ void xp_dma_unmap(struct xsk_buff_pool *xp, struct device *dev,
 		for (j = 0; j < chunks_per_page; j++)
 			xp->base[j].dma = 0;
 	}
+	xp->dev = NULL;
 }
 EXPORT_SYMBOL(xp_dma_unmap);
+
+static bool xp_check_cheap_dma(struct xsk_buff_pool *xp)
+{
+	const struct dma_map_ops *ops = get_dma_ops(xp->dev);
+	phys_addr_t paddr;
+	u32 i;
+
+	if (!dma_is_direct(ops))
+		return false;
+
+#if defined(CONFIG_SWIOTLB)
+	for (i = 0; i < xp->base_size; i++) {
+		paddr = dma_to_phys(xp->dev, xp->base[i].dma);
+		if (is_swiotlb_buffer(paddr))
+			return false;
+	}
+#endif
+
+	if (!dev_is_dma_coherent(xp->dev)) {
+#if defined(CONFIG_ARCH_HAS_SYNC_DMA_FOR_CPU) || \
+    defined(CONFIG_ARCH_HAS_SYNC_DMA_FOR_CPU_ALL) || \
+    defined(CONFIG_ARCH_HAS_SYNC_DMA_FOR_DEVICE)
+		return false;
+#endif
+	}
+	return true;
+}
 
 int xp_dma_map(struct xsk_buff_pool *xp, struct device *dev,
 	       unsigned long attrs, struct page **pages, u32 nr_pages)
@@ -142,6 +172,9 @@ int xp_dma_map(struct xsk_buff_pool *xp, struct device *dev,
 			dma += chunk_size;
 		}
 	}
+
+	xp->dev = dev;
+	xp->cheap_dma = xp_check_cheap_dma(xp);
 	return 0;
 }
 EXPORT_SYMBOL(xp_dma_map);

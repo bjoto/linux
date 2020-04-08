@@ -107,4 +107,22 @@ static inline bool xsk_buff_raw_validate_desc(struct xdp_umem *umem,
 		xp_validate_desc(umem->buff_pool, desc);
 }
 
+static inline void xsk_buff_dma_sync_for_device(struct xdp_umem *umem,
+						struct xdp_buff *xdp,
+						size_t size)
+{
+	return umem->unaligned_buff_pool ?
+		xpu_dma_sync_for_device(umem->buff_pool, xdp, size) :
+		xp_dma_sync_for_device(umem->buff_pool, xdp, size);
+}
+
+static inline void xsk_buff_dma_sync_for_cpu(struct xdp_umem *umem,
+					     struct xdp_buff *xdp,
+					     size_t size)
+{
+	return umem->unaligned_buff_pool ?
+		xpu_dma_sync_for_cpu(umem->buff_pool, xdp, size) :
+		xp_dma_sync_for_cpu(umem->buff_pool, xdp, size);
+}
+
 #endif /* XDP_SOCK_BUFF_H_ */

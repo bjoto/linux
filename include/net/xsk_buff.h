@@ -7,6 +7,7 @@
 #include <linux/bpf.h>
 #include <linux/if_xdp.h>
 #include <net/xdp.h>
+#include <linux/dma-mapping.h>
 
 struct page;
 struct device;
@@ -29,6 +30,8 @@ struct xsk_buff_pool {
 	u32 chunk_bits;
 	u32 base_size;
 	u32 active;
+	bool cheap_dma;
+	struct device *dev;
 	struct xdp_buff_xp base[];
 };
 
@@ -104,6 +107,30 @@ static inline bool xp_validate_desc(struct xsk_buff_pool *xp,
 	if (desc->options)
 		return false;
 	return true;
+}
+
+static inline void xp_dma_sync_for_device(struct xsk_buff_pool *xp,
+					  struct xdp_buff *xdp, size_t size)
+{
+	struct xdp_buff_xp *buff = (struct xdp_buff_xp *)xdp;
+
+	if (xp->cheap_dma)
+		return;
+
+	dma_sync_single_range_for_device(xp->dev, buff->dma, 0,
+					 size, DMA_BIDIRECTIONAL);
+}
+
+static inline void xp_dma_sync_for_cpu(struct xsk_buff_pool *xp,
+				       struct xdp_buff *xdp, size_t size)
+{
+	struct xdp_buff_xp *buff = (struct xdp_buff_xp *)xdp;
+
+	if (xp->cheap_dma)
+		return;
+
+	dma_sync_single_range_for_cpu(xp->dev, buff->dma, 0,
+				      size, DMA_BIDIRECTIONAL);
 }
 
 #endif /* XSK_BUFF_H_ */
