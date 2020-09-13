@@ -288,6 +288,7 @@ static struct option long_options[] = {
 	{"xdp-skb", no_argument, 0, 'S'},
 	{"xdp-native", no_argument, 0, 'N'},
 	{"copy", no_argument, 0, 'c'},
+	{"tear-down", no_argument, 0, 'T'},
 	{"debug", optional_argument, 0, 'D'},
 	{"tx-pkt-count", optional_argument, 0, 'C'},
 	{0, 0, 0, 0}
@@ -304,6 +305,7 @@ static void usage(const char *prog)
 	    "  -S, --xdp-skb=n      Use XDP SKB mode\n"
 	    "  -N, --xdp-native=n   Enforce XDP DRV (native) mode\n"
 	    "  -c, --copy           Force copy mode\n"
+	    "  -T, --tear-down      Tear down sockets by recreating them and running a test again for each of the 2 modes: SKB and DRV\n"
 	    "  -D, --debug          Debug mode - dump packets L2 - L5\n"
 	    "  -C, --tx-pkt-count=n Number of packets to send\n";
 	ksft_print_msg(str, prog);
@@ -406,7 +408,7 @@ static void parse_command_line(int argc, char **argv)
 	opterr = 0;
 
 	for (;;) {
-		c = getopt_long(argc, argv, "i:q:pSNcDC:", long_options, &option_index);
+		c = getopt_long(argc, argv, "i:q:pSNcTDC:", long_options, &option_index);
 
 		if (c == -1)
 			break;
@@ -443,6 +445,9 @@ static void parse_command_line(int argc, char **argv)
 			break;
 		case 'c':
 			opt_xdp_bind_flags |= XDP_COPY;
+			break;
+		case 'T':
+			opt_teardown = 1;
 			break;
 		case 'D':
 			DEBUG_PKTDUMP = 1;
@@ -885,6 +890,8 @@ static void *worker_testapp_validate(void *arg)
 		ksft_print_msg("Received %d packets on interface %s\n",
 			       pktCounter, ((struct ifObjectStruct *)arg)->opt_if);
 
+		if (opt_teardown)
+			ksft_print_msg("Destroying socket\n");
 	}
 
 	xsk_socket__delete((((struct ifObjectStruct *)arg)->xsk)->xsk);
@@ -937,18 +944,70 @@ static void testapp_validate(void)
 		free(pktBuf);
 	}
 
-	if (UUT == ORDER_CONTENT_VALIDATE_XDP_SKB) {
-		if (opt_poll)
-			ksft_test_result_pass("PASS: SKB POLL\n");
-		else
-			ksft_test_result_pass("PASS: SKB NOPOLL\n");
-	} else if (UUT == ORDER_CONTENT_VALIDATE_XDP_DRV) {
-		if (opt_poll)
-			ksft_test_result_pass("PASS: DRV POLL\n");
-		else
-			ksft_test_result_pass("PASS: DRV NOPOLL\n");
+	if (!opt_teardown) {
+		if (UUT == ORDER_CONTENT_VALIDATE_XDP_SKB) {
+			if (opt_poll)
+				ksft_test_result_pass("PASS: SKB POLL\n");
+			else
+				ksft_test_result_pass("PASS: SKB NOPOLL\n");
+		} else if (UUT == ORDER_CONTENT_VALIDATE_XDP_DRV) {
+			if (opt_poll)
+				ksft_test_result_pass("PASS: DRV POLL\n");
+			else
+				ksft_test_result_pass("PASS: DRV NOPOLL\n");
+		}
 	}
+}
 
+static void testapp_socket_teardown(void)
+{
+	if (UUT == ORDER_CONTENT_VALIDATE_XDP_SKB) {
+		if (opt_poll) {
+			ksft_print_msg("Testing SKB POLL Socket Teardown\n");
+			for (int i = 0; i < MAX_TEARDOWN_ITER; i++) {
+				pktCounter = 0;
+				prevPkt = -1;
+				sigVar = 0;
+				ksft_print_msg("Creating socket\n");
+				testapp_validate();
+			}
+			ksft_test_result_pass("PASS: SKB POLL Socket Teardown\n");
+		} else {
+			ksft_print_msg("Testing SKB NOPOLL Socket Teardown\n");
+			for (int i = 0; i < MAX_TEARDOWN_ITER; i++) {
+				pktCounter = 0;
+				prevPkt = -1;
+				sigVar = 0;
+				ksft_print_msg("Creating socket\n");
+				testapp_validate();
+			}
+			ksft_test_result_pass("PASS: SKB NOPOLL Socket Teardown\n");
+
+		}
+	} else if (UUT == ORDER_CONTENT_VALIDATE_XDP_DRV) {
+		if (opt_poll) {
+			ksft_print_msg("Testing DRV POLL Socket Teardown\n");
+			for (int i = 0; i < MAX_TEARDOWN_ITER; i++) {
+				pktCounter = 0;
+				prevPkt = -1;
+				sigVar = 0;
+				ksft_print_msg("Creating socket\n");
+				testapp_validate();
+			}
+			ksft_test_result_pass("PASS: DRV POLL Socket Teardown\n");
+		} else {
+			ksft_print_msg("Testing DRV NOPOLL Socket Teardown\n");
+			for (int i = 0; i < MAX_TEARDOWN_ITER; i++) {
+				pktCounter = 0;
+				prevPkt = -1;
+				sigVar = 0;
+				ksft_print_msg("Creating socket\n");
+				testapp_validate();
+			}
+			ksft_test_result_pass("PASS: DRV NOPOLL Socket Teardown\n");
+
+		}
+	}
 }
 
 static void init_iface_config(void *ifaceConfig)
@@ -1019,7 +1078,11 @@ int main(int argc, char **argv)
 	pthread_init_mutex();
 
 	ksft_set_plan(1);
-	testapp_validate();
+
+	if (!opt_teardown)
+		testapp_validate();
+	else
+		testapp_socket_teardown();
 
 	for (int i = 0; i < MAX_INTERFACES; i++)
 		free(ifDict[i]);

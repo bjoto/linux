@@ -34,6 +34,7 @@ typedef __u16 u16;
 typedef __u8 u8;
 
 /*TESTS Specific*/
+#define MAX_TEARDOWN_ITER 10
 enum TESTS {
 	ORDER_CONTENT_VALIDATE_XDP_SKB = 1,
 	ORDER_CONTENT_VALIDATE_XDP_DRV = 2,
@@ -48,6 +49,7 @@ static u32 opt_batch_size = 64;
 static int opt_pkt_count;
 static u16 opt_pkt_size = MIN_PKT_SIZE;
 static int opt_poll;
+static int opt_teardown;
 static u32 opt_xdp_bind_flags = XDP_USE_NEED_WAKEUP;
 static u32 opt_umem_flags;
 static int opt_mmap_flags;

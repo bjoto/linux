@@ -65,6 +65,9 @@ The following tests are run:
 	  Polling driver/device queues.
       For explanation on poll and no-poll refer to this RFC:
 	  https://patchwork.ozlabs.org/cover/1094083/
+   c. Socket Teardown - nopoll mode
+      Create a Tx and a Rx socket, Tx from one socket, Rx on another. Destroy
+      both sockets, then repeat multiple times.
 
 3. AF_XDP DRV/Native mode
    Works on any netdevice with XDP support, driver dependent. Processes
@@ -72,10 +75,11 @@ The following tests are run:
    Driver hook available just after DMA of buffer descriptor.
    a. nopoll
    b. poll
+   c. Socket Teardown - nopoll mode
 
 For all tests, currently only copy-mode is supported.
 
-Total tests: 5.
+Total tests: 7.
 
 Flow:
 * Single process spawns two threads: Tx and Rx
