@@ -66,9 +66,16 @@ The following tests are run:
       For explanation on poll and no-poll refer to this RFC:
 	  https://patchwork.ozlabs.org/cover/1094083/
 
+3. AF_XDP DRV/Native mode
+   Works on any netdevice with XDP support, driver dependent. Processes
+   packets before SKB allocation. Provides better performance than SKB.
+   Driver hook available just after DMA of buffer descriptor.
+   a. nopoll
+   b. poll
+
 For all tests, currently only copy-mode is supported.
 
-Total tests: 3.
+Total tests: 5.
 
 Flow:
 * Single process spawns two threads: Tx and Rx

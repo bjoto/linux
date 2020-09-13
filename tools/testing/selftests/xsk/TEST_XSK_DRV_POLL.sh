@@ -17,10 +17,12 @@ VETH0=$(cat ${SPECFILE} | cut -d':' -f 1)
 VETH1=$(cat ${SPECFILE} | cut -d':' -f 2 | cut -d',' -f 1)
 NS1=$(cat ${SPECFILE} | cut -d':' -f 2 | cut -d',' -f 2)
 
-vethXDPgeneric ${VETH0} ${VETH1} ${NS1}
+vethXDPnative ${VETH0} ${VETH1} ${NS1}
 
-./${XSKDIR}/${XSKOBJ} -i ${VETH0} -i ${VETH1},${NS1} -S -p -C 10000
+./${XSKDIR}/${XSKOBJ} -i ${VETH0} -i ${VETH1},${NS1} -N -p -C 10000
 
 retval=$?
+
+cleanup_exit ${VETH0} ${VETH1} ${NS1}
 
 test_exit $retval

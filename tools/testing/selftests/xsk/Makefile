@@ -14,8 +14,10 @@ XSKDIR := $(realpath ./xdpprogs)
 XSKOBJ := xdpxceiver
 
 TEST_PROGS := TEST_PREREQUISITES.sh \
-              TEST_XSK_SKB_NOPOLL.sh \
-			  TEST_XSK_SKB_POLL.sh
+	          TEST_XSK_SKB_NOPOLL.sh \
+			  TEST_XSK_SKB_POLL.sh \
+			  TEST_XSK_DRV_NOPOLL.sh \
+			  TEST_XSK_DRV_POLL.sh
 TEST_FILES := prereqs.sh
 TEST_TRANSIENT_FILES := veth.spec
 TEST_PROGS_EXTENDED := $(XSKDIR)/$(XSKOBJ)

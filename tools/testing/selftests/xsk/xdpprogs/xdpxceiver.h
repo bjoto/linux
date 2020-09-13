@@ -24,6 +24,7 @@
 #define MAX_INTERFACES 2
 #define MAX_INTERFACE_NAME_CHARS 7
 #define MAX_INTERFACES_NAMESPACE_CHARS 10
+#define MAX_MAC_STR 18
 #define MAX_IP4_STR 16
 #define MAX_IP6_STR 40
 
@@ -35,8 +36,10 @@ typedef __u8 u8;
 /*TESTS Specific*/
 enum TESTS {
 	ORDER_CONTENT_VALIDATE_XDP_SKB = 1,
+	ORDER_CONTENT_VALIDATE_XDP_DRV = 2,
 };
 u8 UUT;
+u8 DEBUG_PKTDUMP;
 u32 NUM_FRAMES;
 
 static u32 opt_xdp_flags = XDP_FLAGS_UPDATE_IF_NOEXIST;
@@ -151,5 +154,10 @@ struct pkt {
 
 	TAILQ_ENTRY(pkt) pktNodes;
 } *pktNodeRx, *pktNodeRxQ;
+
+struct pktFrame {
+	char *payload;
+} *pktObj;
+struct pktFrame **pktBuf;
 
 #endif				/* XDPXCEIVER_H */

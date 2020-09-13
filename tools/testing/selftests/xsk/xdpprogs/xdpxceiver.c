@@ -286,7 +286,9 @@ static struct option long_options[] = {
 	{"queue", optional_argument, 0, 'q'},
 	{"poll", no_argument, 0, 'p'},
 	{"xdp-skb", no_argument, 0, 'S'},
+	{"xdp-native", no_argument, 0, 'N'},
 	{"copy", no_argument, 0, 'c'},
+	{"debug", optional_argument, 0, 'D'},
 	{"tx-pkt-count", optional_argument, 0, 'C'},
 	{0, 0, 0, 0}
 };
@@ -300,7 +302,9 @@ static void usage(const char *prog)
 	    "  -q, --queue=n        Use queue n (default 0)\n"
 	    "  -p, --poll           Use poll syscall\n"
 	    "  -S, --xdp-skb=n      Use XDP SKB mode\n"
+	    "  -N, --xdp-native=n   Enforce XDP DRV (native) mode\n"
 	    "  -c, --copy           Force copy mode\n"
+	    "  -D, --debug          Debug mode - dump packets L2 - L5\n"
 	    "  -C, --tx-pkt-count=n Number of packets to send\n";
 	ksft_print_msg(str, prog);
 }
@@ -402,7 +406,7 @@ static void parse_command_line(int argc, char **argv)
 	opterr = 0;
 
 	for (;;) {
-		c = getopt_long(argc, argv, "i:q:pScC:", long_options, &option_index);
+		c = getopt_long(argc, argv, "i:q:pSNcDC:", long_options, &option_index);
 
 		if (c == -1)
 			break;
@@ -432,8 +436,16 @@ static void parse_command_line(int argc, char **argv)
 			opt_xdp_bind_flags |= XDP_COPY;
 			UUT = ORDER_CONTENT_VALIDATE_XDP_SKB;
 			break;
+		case 'N':
+			opt_xdp_flags |= XDP_FLAGS_DRV_MODE;
+			opt_xdp_bind_flags |= XDP_COPY;
+			UUT = ORDER_CONTENT_VALIDATE_XDP_DRV;
+			break;
 		case 'c':
 			opt_xdp_bind_flags |= XDP_COPY;
+			break;
+		case 'D':
+			DEBUG_PKTDUMP = 1;
 			break;
 		case 'C':
 			opt_pkt_count = atoi(optarg);
@@ -618,6 +630,59 @@ static void tx_only_all(void *arg)
 		complete_tx_only_all(arg);
 }
 
+static void worker_pkt_dump(void)
+{
+	struct in_addr ipaddr;
+
+	fprintf(stdout, "---------------------------------------\n");
+	for (int iter = 0; iter < NUM_FRAMES - 1; iter++) {
+
+		/*extract L2 frame */
+		fprintf(stdout, "DEBUG>> L2: dst mac: ");
+		for (int i = 0; i < ETH_ALEN; i++)
+			fprintf(stdout, "%02X", ((struct ethhdr *)
+						 (pktBuf[iter]->payload))->h_dest[i]);
+
+		fprintf(stdout, "\nDEBUG>> L2: src mac: ");
+		for (int i = 0; i < ETH_ALEN; i++)
+			fprintf(stdout, "%02X", ((struct ethhdr *)
+						 pktBuf[iter]->payload)->h_source[i]);
+
+		/*extract L3 frame */
+		fprintf(stdout, "\nDEBUG>> L3: ip_hdr->ihl: %02X\n",
+			((struct iphdr *)(pktBuf[iter]->payload + sizeof(struct ethhdr)))->ihl);
+
+		ipaddr.s_addr =
+		    ((struct iphdr *)(pktBuf[iter]->payload + sizeof(struct ethhdr)))->saddr;
+		fprintf(stdout, "DEBUG>> L3: ip_hdr->saddr: %s\n", inet_ntoa(ipaddr));
+
+		ipaddr.s_addr =
+		    ((struct iphdr *)(pktBuf[iter]->payload + sizeof(struct ethhdr)))->daddr;
+		fprintf(stdout, "DEBUG>> L3: ip_hdr->daddr: %s\n", inet_ntoa(ipaddr));
+
+		/*extract L4 frame */
+		fprintf(stdout, "DEBUG>> L4: udp_hdr->src: %d\n",
+			ntohs(((struct udphdr *)(pktBuf[iter]->payload +
+						 sizeof(struct ethhdr) +
+						 sizeof(struct iphdr)))->source));
+
+		fprintf(stdout, "DEBUG>> L4: udp_hdr->dst: %d\n",
+			ntohs(((struct udphdr *)(pktBuf[iter]->payload +
+						 sizeof(struct ethhdr) +
+						 sizeof(struct iphdr)))->dest));
+		/*extract L5 frame */
+		int payload = *((uint32_t *) (pktBuf[iter]->payload + PKT_HDR_SIZE));
+
+		if (payload == EOT) {
+			ksft_print_msg("End-of-tranmission frame received\n");
+			fprintf(stdout, "---------------------------------------\n");
+			break;
+		}
+		fprintf(stdout, "DEBUG>> L5: payload: %d\n", payload);
+		fprintf(stdout, "---------------------------------------\n");
+	}
+}
+
 static void *worker_pkt_validate(void *arg)
 {
 	u32 payloadSeqnum = -2;
@@ -631,6 +696,12 @@ static void *worker_pkt_validate(void *arg)
 			break;
 
 		payloadSeqnum = *((uint32_t *) (pktNodeRxQ->pktFrame + PKT_HDR_SIZE));
+		if ((DEBUG_PKTDUMP) && (payloadSeqnum != EOT)) {
+			pktObj = (struct pktFrame *)malloc(sizeof(struct pktFrame));
+			pktObj->payload = (char *)malloc(PKT_SIZE);
+			memcpy(pktObj->payload, pktNodeRxQ->pktFrame, PKT_SIZE);
+			pktBuf[payloadSeqnum] = pktObj;
+		}
 
 		if (payloadSeqnum == EOT) {
 			ksft_print_msg("End-of-tranmission frame received: PASS\n");
@@ -772,6 +843,14 @@ static void *worker_testapp_validate(void *arg)
 		int ret, i;
 
 		TAILQ_INIT(&head);
+		if (DEBUG_PKTDUMP) {
+			pktBuf = malloc(sizeof(struct pktFrame **) * NUM_FRAMES);
+			if (pktBuf == NULL) {
+				ksft_print_msg("ERROR: malloc \"%s\"\n", strerror(errno));
+				ksft_test_result_fail("ERROR: malloc\n");
+				ksft_exit_xfail();
+			}
+		}
 
 		for (i = 0; i < num_socks; i++) {
 			fds[0].fd = xsk_socket__fd((((struct ifObjectStruct *)
@@ -849,10 +928,27 @@ static void testapp_validate(void)
 	pthread_join(t1, NULL);
 	pthread_join(t0, NULL);
 
-	if (opt_poll)
-		ksft_test_result_pass("PASS: SKB POLL\n");
-	else
-		ksft_test_result_pass("PASS: SKB NOPOLL\n");
+	if (DEBUG_PKTDUMP) {
+		worker_pkt_dump();
+		for (int iter = 0; iter < NUM_FRAMES - 1; iter++) {
+			free(pktBuf[iter]->payload);
+			free(pktBuf[iter]);
+		}
+		free(pktBuf);
+	}
+
+	if (UUT == ORDER_CONTENT_VALIDATE_XDP_SKB) {
+		if (opt_poll)
+			ksft_test_result_pass("PASS: SKB POLL\n");
+		else
+			ksft_test_result_pass("PASS: SKB NOPOLL\n");
+	} else if (UUT == ORDER_CONTENT_VALIDATE_XDP_DRV) {
+		if (opt_poll)
+			ksft_test_result_pass("PASS: DRV POLL\n");
+		else
+			ksft_test_result_pass("PASS: DRV NOPOLL\n");
+	}
+
 }
 
 static void init_iface_config(void *ifaceConfig)
