@@ -7,15 +7,30 @@ ifeq ($(VAR_LDLIBS),)
 VAR_LDLIBS :=
 endif
 
+CFLAGS += -O2 -g -std=gnu99 -Wall -I../../../../usr/include/ $(VAR_CFLAGS)
+LDLIBS += $(VAR_LDLIBS)
+
+XSKDIR := $(realpath ./xdpprogs)
+XSKOBJ := xdpxceiver
+
 TEST_PROGS := TEST_PREREQUISITES.sh \
-              TEST_XSK.sh
+              TEST_XSK_SKB_NOPOLL.sh \
+			  TEST_XSK_SKB_POLL.sh
 TEST_FILES := prereqs.sh
 TEST_TRANSIENT_FILES := veth.spec
-TEST_PROGS_EXTENDED :=
+TEST_PROGS_EXTENDED := $(XSKDIR)/$(XSKOBJ)
+
+all: $(TEST_PROGS_EXTENDED)
 
 KSFT_KHDR_INSTALL := 1
 include ../lib.mk
 
+$(TEST_PROGS_EXTENDED): $(XSKDIR)/$(XSKOBJ)
+
+$(XSKDIR)/$(XSKOBJ):
+	cd $(XSKDIR) && $(MAKE)
+
 override define CLEAN
 	$(RM) $(TEST_TRANSIENT_FILES)
+	cd $(XSKDIR) && $(MAKE) clean
 endef

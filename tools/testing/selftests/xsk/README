@@ -36,6 +36,12 @@ https://www.kernel.org/doc/html/latest/networking/af_xdp.html
 
 Tests Information:
 ------------------
+These selftests test AF_XDP SKB and Native/DRV modes using veth
+Virtual Ethernet interfaces.
+
+Test program is a multi-threaded tx/rx process, each thread is single socket
+with a unique UMEM, it validates in-order packet delivery and packet content.
+
 The following tests are run:
 
 1. PREREQUISITES
@@ -49,7 +55,29 @@ The following tests are run:
    *** xxxx and yyyy are randomnly generated 4 digit numbers used to avoid
        conflict with any existing interface.
 
-Total tests: 1.
+2. AF_XDP SKB mode
+   Generic mode XDP that is driver independent, used when the driver does
+   not have support for XDP. Works on any netdevice using sockets and
+   generic XDP path. XDP hook from netif_receive_skb().
+   a. nopoll - soft-irq processing
+   b. poll - busy-pollng, using poll() syscall
+      No longer waiting for device interrupts being generated/handled.
+	  Polling driver/device queues.
+      For explanation on poll and no-poll refer to this RFC:
+	  https://patchwork.ozlabs.org/cover/1094083/
+
+For all tests, currently only copy-mode is supported.
+
+Total tests: 3.
+
+Flow:
+* Single process spawns two threads: Tx and Rx
+* Each of these two threads attach to a veth interface within their assigned
+  namespaces
+* Each thread Creates one AF_XDP socket connected to a unique umem for each
+  veth interface
+* Tx thread Transmits 10k packets from vethxxxx to vethyyyy
+* Rx thread verifies if all 10k packets were received and delivered in-order
 
 Kernel configuration:
 ---------------------
