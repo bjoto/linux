@@ -19,8 +19,10 @@ NS1=$(cat ${SPECFILE} | cut -d':' -f 2 | cut -d',' -f 2)
 
 vethXDPnative ${VETH0} ${VETH1} ${NS1}
 
-./${XSKDIR}/${XSKOBJ} -i ${VETH0} -i ${VETH1},${NS1} -N -T -C 10000
+./${XSKDIR}/${XSKOBJ} -i ${VETH0} -i ${VETH1},${NS1} -N -B -C 10000
 
 retval=$?
+
+cleanup_exit ${VETH0} ${VETH1} ${NS1}
 
 test_exit $retval

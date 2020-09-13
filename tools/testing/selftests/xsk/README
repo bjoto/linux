@@ -68,6 +68,9 @@ The following tests are run:
    c. Socket Teardown - nopoll mode
       Create a Tx and a Rx socket, Tx from one socket, Rx on another. Destroy
       both sockets, then repeat multiple times.
+   d. Bidi sockets - nopoll mode
+      Configure sockets as bi-directional tx/rx sockets, sets up fq and cq
+      on each socket, tx/rx in both directions
 
 3. AF_XDP DRV/Native mode
    Works on any netdevice with XDP support, driver dependent. Processes
@@ -76,10 +79,11 @@ The following tests are run:
    a. nopoll
    b. poll
    c. Socket Teardown - nopoll mode
+   d. Bidi sockets - nopoll mode
 
 For all tests, currently only copy-mode is supported.
 
-Total tests: 7.
+Total tests: 9.
 
 Flow:
 * Single process spawns two threads: Tx and Rx
