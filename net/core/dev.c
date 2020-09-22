@@ -6378,6 +6378,9 @@ bool napi_schedule_prep(struct napi_struct *n)
 		val = READ_ONCE(n->state);
 		if (unlikely(val & NAPIF_STATE_DISABLE))
 			return false;
+		if (unlikely(val & NAPIF_STATE_BIAS_BUSY_POLL))
+			return false;
+
 		new = val | NAPIF_STATE_SCHED;
 
 		/* Sets STATE_MISSED bit if STATE_SCHED was already set
@@ -6458,11 +6461,13 @@ bool napi_complete_done(struct napi_struct *n, int work_done)
 
 		/* If STATE_MISSED was set, leave STATE_SCHED set,
 		 * because we will call napi->poll() one more time.
-		 * This C code was suggested by Alexander Duyck to help gcc.
 		 */
-		new |= (val & NAPIF_STATE_MISSED) / NAPIF_STATE_MISSED *
-						    NAPIF_STATE_SCHED;
+		if (val & NAPIF_STATE_MISSED && !(val & NAPIF_STATE_BIAS_BUSY_POLL))
+			new |= NAPIF_STATE_SCHED;
 	} while (cmpxchg(&n->state, val, new) != val);
+
+	if (unlikely(val & NAPIF_STATE_BIAS_BUSY_POLL))
+		return false;
 
 	if (unlikely(val & NAPIF_STATE_MISSED)) {
 		__napi_schedule(n);
@@ -6497,6 +6502,22 @@ static void busy_poll_stop(struct napi_struct *napi, void *have_poll_lock)
 {
 	int rc;
 
+	clear_bit(NAPI_STATE_IN_BUSY_POLL, &napi->state);
+
+	/* If we're biased towards busy poll, clear the sched flags,
+	 * so that we can enter again.
+	 */
+	if (READ_ONCE(napi->state) & NAPIF_STATE_BIAS_BUSY_POLL) {
+		if (have_poll_lock) {
+			local_bh_disable();
+			netpoll_poll_unlock(have_poll_lock);
+			local_bh_enable();
+		}
+
+		napi_complete(napi);
+		return;
+	}
+
 	/* Busy polling means there is a high chance device driver hard irq
 	 * could not grab NAPI_STATE_SCHED, and that NAPI_STATE_MISSED was
 	 * set in napi_schedule_prep().
@@ -6507,8 +6528,6 @@ static void busy_poll_stop(struct napi_struct *napi, void *have_poll_lock)
 	 * to perform these two clear_bit()
 	 */
 	clear_bit(NAPI_STATE_MISSED, &napi->state);
-	clear_bit(NAPI_STATE_IN_BUSY_POLL, &napi->state);
-
 	local_bh_disable();
 
 	/* All we really want here is to re-enable device interrupts.
@@ -6569,6 +6588,10 @@ restart:
 				goto count;
 			have_poll_lock = netpoll_poll_lock(napi);
 			napi_poll = napi->poll;
+			if (val & NAPIF_STATE_BIAS_BUSY_POLL) {
+				hrtimer_start(&napi->bp_watchdog, ms_to_ktime(2000),
+					      HRTIMER_MODE_REL_PINNED);
+			}
 		}
 		work = napi_poll(napi, BUSY_POLL_BUDGET);
 		trace_napi_poll(napi, work, BUSY_POLL_BUDGET);
@@ -6652,6 +6675,54 @@ static enum hrtimer_restart napi_watchdog(struct hrtimer *timer)
 	return HRTIMER_NORESTART;
 }
 
+static enum hrtimer_restart napi_biased_busy_poll_watchdog(struct hrtimer *timer)
+{
+	struct napi_struct *napi;
+	unsigned long val, new;
+
+	napi = container_of(timer, struct napi_struct, bp_watchdog);
+
+	do {
+		val = READ_ONCE(napi->state);
+		if (WARN_ON_ONCE(!(val & NAPIF_STATE_BIAS_BUSY_POLL)))
+			return HRTIMER_NORESTART;
+
+		new = val & ~NAPIF_STATE_BIAS_BUSY_POLL;
+	} while (cmpxchg(&napi->state, val, new) != val);
+
+	/* Note : we use a relaxed variant of napi_schedule_prep() not setting
+	 * NAPI_STATE_MISSED, since we do not react to a device IRQ.
+	 */
+	if (!napi_disable_pending(napi) &&
+	    !test_and_set_bit(NAPI_STATE_SCHED, &napi->state))
+		__napi_schedule_irqoff(napi);
+
+	return HRTIMER_NORESTART;
+}
+
+void napi_bias_busy_poll(unsigned int napi_id)
+{
+#ifdef CONFIG_NET_RX_BUSY_POLL
+	struct napi_struct *napi;
+	unsigned long val, new;
+
+	napi = napi_by_id(napi_id);
+	if (!napi)
+		return;
+
+	do {
+		val = READ_ONCE(napi->state);
+		if (val & NAPIF_STATE_BIAS_BUSY_POLL)
+			return;
+
+		new = val | NAPIF_STATE_BIAS_BUSY_POLL;
+	} while (cmpxchg(&napi->state, val, new) != val);
+	hrtimer_start(&napi->bp_watchdog, ms_to_ktime(2000), HRTIMER_MODE_REL_PINNED);
+#endif
+}
+EXPORT_SYMBOL(napi_bias_busy_poll);
+
+
 static void init_gro_hash(struct napi_struct *napi)
 {
 	int i;
@@ -6673,6 +6744,8 @@ void netif_napi_add(struct net_device *dev, struct napi_struct *napi,
 	INIT_HLIST_NODE(&napi->napi_hash_node);
 	hrtimer_init(&napi->timer, CLOCK_MONOTONIC, HRTIMER_MODE_REL_PINNED);
 	napi->timer.function = napi_watchdog;
+	hrtimer_init(&napi->bp_watchdog, CLOCK_MONOTONIC, HRTIMER_MODE_REL_PINNED);
+	napi->bp_watchdog.function = napi_biased_busy_poll_watchdog;
 	init_gro_hash(napi);
 	napi->skb = NULL;
 	INIT_LIST_HEAD(&napi->rx_list);
@@ -6704,7 +6777,9 @@ void napi_disable(struct napi_struct *n)
 		msleep(1);
 
 	hrtimer_cancel(&n->timer);
+	hrtimer_cancel(&n->bp_watchdog);
 
+	clear_bit(NAPI_STATE_BIAS_BUSY_POLL, &n->state);
 	clear_bit(NAPI_STATE_DISABLE, &n->state);
 }
 EXPORT_SYMBOL(napi_disable);
@@ -6766,6 +6841,11 @@ static int napi_poll(struct napi_struct *n, struct list_head *repoll)
 
 	if (likely(work < weight))
 		goto out_unlock;
+
+	if (unlikely(n->state & NAPIF_STATE_BIAS_BUSY_POLL)) {
+		napi_complete(n);
+		goto out_unlock;
+	}
 
 	/* Drivers must not modify the NAPI state if they
 	 * consume the entire weight.  In such cases this code

@@ -99,13 +99,25 @@ static inline bool sk_busy_loop_timeout(struct sock *sk,
 	return true;
 }
 
+#ifdef CONFIG_NET_RX_BUSY_POLL
+static inline void __sk_bias_busy_poll(struct sock *sk, unsigned int napi_id)
+{
+	if (likely(!READ_ONCE(sk->sk_bias_busy_poll)))
+		return;
+
+	napi_bias_busy_poll(napi_id);
+}
+#endif
+
 static inline void sk_busy_loop(struct sock *sk, int nonblock)
 {
 #ifdef CONFIG_NET_RX_BUSY_POLL
 	unsigned int napi_id = READ_ONCE(sk->sk_napi_id);
 
-	if (napi_id >= MIN_NAPI_ID)
+	if (napi_id >= MIN_NAPI_ID) {
+		__sk_bias_busy_poll(sk, napi_id);
 		napi_busy_loop(napi_id, nonblock ? NULL : sk_busy_loop_end, sk);
+	}
 #endif
 }
 

@@ -344,29 +344,32 @@ struct napi_struct {
 	struct list_head	rx_list; /* Pending GRO_NORMAL skbs */
 	int			rx_count; /* length of rx_list */
 	struct hrtimer		timer;
+	struct hrtimer		bp_watchdog;
 	struct list_head	dev_list;
 	struct hlist_node	napi_hash_node;
 	unsigned int		napi_id;
 };
 
 enum {
-	NAPI_STATE_SCHED,	/* Poll is scheduled */
-	NAPI_STATE_MISSED,	/* reschedule a napi */
-	NAPI_STATE_DISABLE,	/* Disable pending */
-	NAPI_STATE_NPSVC,	/* Netpoll - don't dequeue from poll_list */
-	NAPI_STATE_LISTED,	/* NAPI added to system lists */
-	NAPI_STATE_NO_BUSY_POLL,/* Do not add in napi_hash, no busy polling */
-	NAPI_STATE_IN_BUSY_POLL,/* sk_busy_loop() owns this NAPI */
+	NAPI_STATE_SCHED,		/* Poll is scheduled */
+	NAPI_STATE_MISSED,		/* reschedule a napi */
+	NAPI_STATE_DISABLE,		/* Disable pending */
+	NAPI_STATE_NPSVC,		/* Netpoll - don't dequeue from poll_list */
+	NAPI_STATE_LISTED,		/* NAPI added to system lists */
+	NAPI_STATE_NO_BUSY_POLL,	/* Do not add in napi_hash, no busy polling */
+	NAPI_STATE_IN_BUSY_POLL,	/* sk_busy_loop() owns this NAPI */
+	NAPI_STATE_BIAS_BUSY_POLL,	/* prefer busy poll XXX */
 };
 
 enum {
-	NAPIF_STATE_SCHED	 = BIT(NAPI_STATE_SCHED),
-	NAPIF_STATE_MISSED	 = BIT(NAPI_STATE_MISSED),
-	NAPIF_STATE_DISABLE	 = BIT(NAPI_STATE_DISABLE),
-	NAPIF_STATE_NPSVC	 = BIT(NAPI_STATE_NPSVC),
-	NAPIF_STATE_LISTED	 = BIT(NAPI_STATE_LISTED),
-	NAPIF_STATE_NO_BUSY_POLL = BIT(NAPI_STATE_NO_BUSY_POLL),
-	NAPIF_STATE_IN_BUSY_POLL = BIT(NAPI_STATE_IN_BUSY_POLL),
+	NAPIF_STATE_SCHED	   = BIT(NAPI_STATE_SCHED),
+	NAPIF_STATE_MISSED	   = BIT(NAPI_STATE_MISSED),
+	NAPIF_STATE_DISABLE	   = BIT(NAPI_STATE_DISABLE),
+	NAPIF_STATE_NPSVC	   = BIT(NAPI_STATE_NPSVC),
+	NAPIF_STATE_LISTED	   = BIT(NAPI_STATE_LISTED),
+	NAPIF_STATE_NO_BUSY_POLL   = BIT(NAPI_STATE_NO_BUSY_POLL),
+	NAPIF_STATE_IN_BUSY_POLL   = BIT(NAPI_STATE_IN_BUSY_POLL),
+	NAPIF_STATE_BIAS_BUSY_POLL = BIT(NAPI_STATE_BIAS_BUSY_POLL),
 };
 
 enum gro_result {
@@ -554,6 +557,8 @@ static inline bool napi_if_scheduled_mark_missed(struct napi_struct *n)
 
 	return true;
 }
+
+void napi_bias_busy_poll(unsigned int napi_id);
 
 enum netdev_queue_state_t {
 	__QUEUE_STATE_DRV_XOFF,

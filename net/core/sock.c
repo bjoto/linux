@@ -1164,6 +1164,12 @@ set_sndbuf:
 				sk->sk_ll_usec = val;
 		}
 		break;
+	case SO_BIAS_BUSY_POLL:
+		if (valbool && !capable(CAP_NET_ADMIN))
+			ret = -EPERM;
+		else
+			sk->sk_bias_busy_poll = valbool;
+		break;
 #endif
 
 	case SO_MAX_PACING_RATE:
@@ -1527,6 +1533,9 @@ int sock_getsockopt(struct socket *sock, int level, int optname,
 #ifdef CONFIG_NET_RX_BUSY_POLL
 	case SO_BUSY_POLL:
 		v.val = sk->sk_ll_usec;
+		break;
+	case SO_BIAS_BUSY_POLL:
+		v.val = sk->sk_bias_busy_poll;
 		break;
 #endif
 
