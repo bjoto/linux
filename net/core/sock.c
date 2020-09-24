@@ -1170,6 +1170,16 @@ set_sndbuf:
 		else
 			sk->sk_bias_busy_poll = valbool;
 		break;
+	case SO_BUSY_POLL_BUDGET:
+		if ((val > sk->sk_busy_poll_budget) && !capable(CAP_NET_ADMIN))
+			ret = -EPERM;
+		else {
+			if (val < 0)
+				ret = -EINVAL;
+			else
+				sk->sk_busy_poll_budget = val;
+		}
+		break;
 #endif
 
 	case SO_MAX_PACING_RATE:
