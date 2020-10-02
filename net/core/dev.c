@@ -6502,17 +6502,15 @@ static void busy_poll_stop(struct napi_struct *napi, void *have_poll_lock, u16 b
 
 	clear_bit(NAPI_STATE_IN_BUSY_POLL, &napi->state);
 
+	local_bh_disable();
 	/* If we're biased towards busy poll, clear the sched flags,
 	 * so that we can enter again.
 	 */
 	if (READ_ONCE(napi->state) & NAPIF_STATE_BIAS_BUSY_POLL) {
-		if (have_poll_lock) {
-			local_bh_disable();
-			netpoll_poll_unlock(have_poll_lock);
-			local_bh_enable();
-		}
-
+		netpoll_poll_unlock(have_poll_lock);
 		napi_complete(napi);
+		__kfree_skb_flush();
+		local_bh_enable();
 		return;
 	}
 
@@ -6526,7 +6524,6 @@ static void busy_poll_stop(struct napi_struct *napi, void *have_poll_lock, u16 b
 	 * to perform these two clear_bit()
 	 */
 	clear_bit(NAPI_STATE_MISSED, &napi->state);
-	local_bh_disable();
 
 	/* All we really want here is to re-enable device interrupts.
 	 * Ideally, a new ndo_busy_poll_stop() could avoid another round.
