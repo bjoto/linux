@@ -3753,6 +3753,8 @@ static irqreturn_t i40e_msix_clean_rings(int irq, void *data)
 {
 	struct i40e_q_vector *q_vector = data;
 
+	disable_irq_nosync(irq);
+
 	if (!q_vector->tx.ring && !q_vector->rx.ring)
 		return IRQ_HANDLED;
 
@@ -3964,6 +3966,8 @@ static irqreturn_t i40e_intr(int irq, void *data)
 	u32 icr0, icr0_remaining;
 	u32 val, ena_mask;
 
+	disable_irq_nosync(irq);
+
 	icr0 = rd32(hw, I40E_PFINT_ICR0);
 	ena_mask = rd32(hw, I40E_PFINT_ICR0_ENA);
 
@@ -4068,6 +4072,8 @@ static irqreturn_t i40e_intr(int irq, void *data)
 	ret = IRQ_HANDLED;
 
 enable_intr:
+	enable_irq(irq);
+
 	/* re-enable interrupt causes */
 	wr32(hw, I40E_PFINT_ICR0_ENA, ena_mask);
 	if (!test_bit(__I40E_DOWN, pf->state) ||
@@ -4173,6 +4179,8 @@ static irqreturn_t i40e_fdir_clean_ring(int irq, void *data)
 {
 	struct i40e_q_vector *q_vector = data;
 	struct i40e_vsi *vsi;
+
+	disable_irq_nosync(irq);
 
 	if (!q_vector->tx.ring)
 		return IRQ_HANDLED;
@@ -9966,7 +9974,7 @@ static void i40e_rebuild(struct i40e_pf *pf, bool reinit, bool lock_acquired)
 	struct i40e_hw *hw = &pf->hw;
 	u8 set_fc_aq_fail = 0;
 	i40e_status ret;
-	u32 val;
+	u32 val, reg;
 	int v;
 
 	if (test_bit(__I40E_EMP_RESET_INTR_RECEIVED, pf->state) &&
@@ -10247,6 +10255,12 @@ end_core_reset:
 clear_recovery:
 	clear_bit(__I40E_RESET_RECOVERY_PENDING, pf->state);
 	clear_bit(__I40E_TIMEOUT_RECOVERY_PENDING, pf->state);
+
+	reg = rd32(hw, I40E_GLINT_CTL);
+	reg |= I40E_GLINT_CTL_DIS_AUTOMASK_PF0_MASK |
+	       I40E_GLINT_CTL_DIS_AUTOMASK_VF0_MASK |
+	       I40E_GLINT_CTL_DIS_AUTOMASK_N_MASK;
+	wr32(hw, I40E_GLINT_CTL, reg);
 }
 
 /**
@@ -11150,8 +11164,10 @@ err_out:
  **/
 static int i40e_init_interrupt_scheme(struct i40e_pf *pf)
 {
+	struct i40e_hw *hw = &pf->hw;
 	int vectors = 0;
 	ssize_t size;
+	u32 reg;
 
 	if (pf->flags & I40E_FLAG_MSIX_ENABLED) {
 		vectors = i40e_init_msix(pf);
@@ -11199,6 +11215,11 @@ static int i40e_init_interrupt_scheme(struct i40e_pf *pf)
 	/* track first vector for misc interrupts, ignore return */
 	(void)i40e_get_lump(pf, pf->irq_pile, 1, I40E_PILE_VALID_BIT - 1);
 
+	reg = rd32(hw, I40E_GLINT_CTL);
+	reg |= I40E_GLINT_CTL_DIS_AUTOMASK_PF0_MASK |
+	       I40E_GLINT_CTL_DIS_AUTOMASK_VF0_MASK |
+	       I40E_GLINT_CTL_DIS_AUTOMASK_N_MASK;
+	wr32(hw, I40E_GLINT_CTL, reg);
 	return 0;
 }
 

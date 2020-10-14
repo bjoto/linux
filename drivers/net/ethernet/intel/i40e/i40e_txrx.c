@@ -939,6 +939,14 @@ static void i40e_enable_wb_on_itr(struct i40e_vsi *vsi,
  **/
 void i40e_force_wb(struct i40e_vsi *vsi, struct i40e_q_vector *q_vector)
 {
+	struct i40e_pf *pf = vsi->back;
+	int vector, base, irq;
+
+	base = vsi->base_vector;
+	vector = q_vector->v_idx;
+	irq = pf->msix_entries[base + vector].vector;
+	enable_irq(irq);
+
 	if (vsi->back->flags & I40E_FLAG_MSIX_ENABLED) {
 		u32 val = I40E_PFINT_DYN_CTLN_INTENA_MASK |
 			  I40E_PFINT_DYN_CTLN_ITR_INDX_MASK | /* set noitr */
@@ -2505,6 +2513,8 @@ static inline void i40e_update_enable_itr(struct i40e_vsi *vsi,
 					  struct i40e_q_vector *q_vector)
 {
 	struct i40e_hw *hw = &vsi->back->hw;
+	struct i40e_pf *pf = vsi->back;
+	int vector, base, irq;
 	u32 intval;
 
 	/* If we don't have MSIX, then we only need to re-enable icr0 */
@@ -2553,6 +2563,11 @@ static inline void i40e_update_enable_itr(struct i40e_vsi *vsi,
 		if (q_vector->itr_countdown)
 			q_vector->itr_countdown--;
 	}
+
+	base = vsi->base_vector;
+	vector = q_vector->v_idx;
+	irq = pf->msix_entries[base + vector].vector;
+	enable_irq(irq);
 
 	if (!test_bit(__I40E_VSI_DOWN, vsi->state))
 		wr32(hw, INTREG(q_vector->reg_idx), intval);
