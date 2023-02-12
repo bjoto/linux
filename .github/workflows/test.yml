@@ -250,6 +250,7 @@ jobs:
         name: Build selftests
         uses: bjoto/bpf-ci/build-selftests@master
         with:
+          arch: ${{ matrix.arch }}
           toolchain: ${{ matrix.toolchain }}
           kbuild-output: ${{ env.KBUILD_OUTPUT }}
           max-make-jobs: 32
@@ -257,6 +258,7 @@ jobs:
         name: Build samples
         uses: bjoto/bpf-ci/build-samples@master
         with:
+          arch: ${{ matrix.arch }}
           toolchain: ${{ matrix.toolchain }}
           kbuild-output: ${{ env.KBUILD_OUTPUT }}
           max-make-jobs: 32
