@@ -286,10 +286,14 @@ jobs:
               tools/include/ \
               tools/bpf/bpftool/";
           fi
+
+          ARCH=$(echo ${{ matrix.arch }} | sed 's/x86_64/x86/' | sed 's/s390x/s390/' | \
+            sed 's/aarch64/arm64/' | sed 's/riscv64/riscv/)'
+
           # zstd is installed by default in the runner images.
           tar -cf - \
             "${KBUILD_OUTPUT}"/.config \
-            "${KBUILD_OUTPUT}"/$(KBUILD_OUTPUT="${KBUILD_OUTPUT}" make -s image_name) \
+            "${KBUILD_OUTPUT}"/$(KBUILD_OUTPUT="${KBUILD_OUTPUT}" make ARCH=${ARCH} -s image_name) \
             "${KBUILD_OUTPUT}"/include/config/auto.conf \
             "${KBUILD_OUTPUT}"/include/generated/autoconf.h \
             "${KBUILD_OUTPUT}"/vmlinux \
