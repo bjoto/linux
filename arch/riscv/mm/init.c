@@ -1246,18 +1246,19 @@ asmlinkage void __init setup_vm(uintptr_t dtb_pa)
 	pt_ops_set_fixmap();
 }
 
-static void __init create_linear_mapping_range(phys_addr_t start,
-					       phys_addr_t end)
+static void __meminit create_linear_mapping_range(phys_addr_t start, phys_addr_t end,
+						  struct mhp_params *params)
 {
 	phys_addr_t pa;
 	uintptr_t va, map_size;
 
 	for (pa = start; pa < end; pa += map_size) {
-		va = (uintptr_t)__va(pa);
-		map_size = best_map_size(pa, end - pa);
+		pgprot_t pgprot;
 
-		create_pgd_mapping(swapper_pg_dir, va, pa, map_size,
-				   pgprot_from_va(va));
+		va = (uintptr_t)__va(pa);
+		pgprot =  params ? params->pgprot : pgprot_from_va(va);
+		map_size = best_map_size(pa, end - pa);
+		create_pgd_mapping(swapper_pg_dir, va, pa, map_size, pgprot);
 	}
 }
 
@@ -1287,13 +1288,12 @@ static void __init create_linear_mapping_page_table(void)
 		if (end >= __pa(PAGE_OFFSET) + memory_limit)
 			end = __pa(PAGE_OFFSET) + memory_limit;
 
-		create_linear_mapping_range(start, end);
+		create_linear_mapping_range(start, end, NULL);
 	}
 
 #ifdef CONFIG_STRICT_KERNEL_RWX
-	create_linear_mapping_range(ktext_start, ktext_start + ktext_size);
-	create_linear_mapping_range(krodata_start,
-				    krodata_start + krodata_size);
+	create_linear_mapping_range(ktext_start, ktext_start + ktext_size, NULL);
+	create_linear_mapping_range(krodata_start, krodata_start + krodata_size, NULL);
 
 	memblock_clear_nomap(ktext_start,  ktext_size);
 	memblock_clear_nomap(krodata_start, krodata_size);
