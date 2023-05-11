@@ -31,6 +31,7 @@
 #include <asm/io.h>
 #include <asm/ptdump.h>
 #include <asm/numa.h>
+#include <asm/kasan.h>
 
 #include "../kernel/head.h"
 
@@ -156,6 +157,89 @@ static void __init print_vm_layout(void)
 static void print_vm_layout(void) { }
 #endif /* CONFIG_DEBUG_VM */
 
+#ifdef CONFIG_MEMORY_HOTPLUG
+/*
+ * Pre-allocates page-table pages for the vmalloc area in the kernel
+ * page-table. Only the level which needs to be synchronized between
+ * all page-tables is allocated because the synchronization can be
+ * expensive.
+ */
+static void __init preallocate_pgd_pages_range(unsigned long start, unsigned long end)
+{
+	unsigned long addr;
+	const char *lvl;
+
+	for (addr = start; addr < end; addr = ALIGN(addr + 1, PGDIR_SIZE)) {
+		pgd_t *pgd = pgd_offset_k(addr);
+		p4d_t *p4d;
+		pud_t *pud;
+		pmd_t *pmd;
+
+		lvl = "p4d";
+		p4d = p4d_alloc(&init_mm, pgd, addr);
+		if (!p4d)
+			goto failed;
+
+		if (pgtable_l5_enabled)
+			continue;
+
+		/*
+		 * The goal here is to allocate all possibly required
+		 * hardware page tables pointed to by the top hardware
+		 * level.
+		 *
+		 * On 4-level systems, the P4D layer is folded away
+		 * and the above code does no preallocation.  Below,
+		 * go down to the pud _software_ level to ensure the
+		 * second hardware level is allocated on 4-level
+		 * systems too.
+		 */
+		lvl = "pud";
+		pud = pud_alloc(&init_mm, p4d, addr);
+		if (!pud)
+			goto failed;
+
+		if (pgtable_l4_enabled)
+			continue;
+		/*
+		 * The goal here is to allocate all possibly required
+		 * hardware page tables pointed to by the top hardware
+		 * level.
+		 *
+		 * On 3-level systems, the PUD layer is folded away
+		 * and the above code does no preallocation.  Below,
+		 * go down to the pmd _software_ level to ensure the
+		 * second hardware level is allocated on 3-level
+		 * systems too.
+		 */
+		lvl = "pmd";
+		pmd = pmd_alloc(&init_mm, pud, addr);
+		if (!pmd)
+			goto failed;
+	}
+
+	return;
+
+failed:
+
+	/*
+	 * The pages have to be there now or they will be missing in
+	 * process page-tables later.
+	 */
+	panic("Failed to pre-allocate %s pages for vmalloc area\n", lvl);
+}
+
+#define PAGE_END KASAN_SHADOW_START
+#endif
+
+static void __init prepare_memory_hotplug(void)
+{
+#ifdef CONFIG_MEMORY_HOTPLUG
+	preallocate_pgd_pages_range(VMEMMAP_START, VMEMMAP_END);
+	preallocate_pgd_pages_range(PAGE_OFFSET, PAGE_END);
+#endif
+}
+
 void __init mem_init(void)
 {
 #ifdef CONFIG_FLATMEM
@@ -164,6 +248,7 @@ void __init mem_init(void)
 
 	swiotlb_init(max_pfn > PFN_DOWN(dma32_phys_limit), SWIOTLB_VERBOSE);
 	memblock_free_all();
+	prepare_memory_hotplug();
 
 	print_vm_layout();
 }
