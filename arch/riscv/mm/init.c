@@ -235,6 +235,7 @@ failed:
 static void __init prepare_memory_hotplug(void)
 {
 #ifdef CONFIG_MEMORY_HOTPLUG
+	preallocate_pgd_pages_range(VMALLOC_START, VMALLOC_END);
 	preallocate_pgd_pages_range(VMEMMAP_START, VMEMMAP_END);
 	preallocate_pgd_pages_range(PAGE_OFFSET, PAGE_END);
 #endif

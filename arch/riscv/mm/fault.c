@@ -233,12 +233,17 @@ void handle_page_fault(struct pt_regs *regs)
 	 * Fault-in kernel-space virtual memory on-demand.
 	 * The 'reference' page table is init_mm.pgd.
 	 *
+	 * For memory hotplug enabled systems, the PGD entries are
+	 * pre-allocated, which avoids the need to synchronize
+	 * pgd/fault-in.
+	 *
 	 * NOTE! We MUST NOT take any locks for this case. We may
 	 * be in an interrupt or a critical region, and should
 	 * only copy the information from the master page table,
 	 * nothing more.
 	 */
-	if (unlikely((addr >= VMALLOC_START) && (addr < VMALLOC_END))) {
+	if (unlikely(!IS_ENABLED(CONFIG_MEMORY_HOTPLUG) &&
+		     (addr >= VMALLOC_START) && (addr < VMALLOC_END))) {
 		vmalloc_fault(regs, code, addr);
 		return;
 	}
