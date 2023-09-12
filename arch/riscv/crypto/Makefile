@@ -21,3 +21,6 @@ sm3-riscv64-y := sm3-riscv64-glue.o sm3-riscv64-zvksh-zvkb.o
 
 obj-$(CONFIG_CRYPTO_SM4_RISCV64) += sm4-riscv64.o
 sm4-riscv64-y := sm4-riscv64-glue.o sm4-riscv64-zvksed-zvkb.o
+
+obj-$(CONFIG_CRYPTO_BLAKE2S_RISCV) += libblake2s-riscv.o
+libblake2s-riscv-y := blake2s-v.o blake2s-glue.o
