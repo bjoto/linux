@@ -576,3 +576,11 @@ config SERIAL_OF_PLATFORM
 	  are probed through devicetree, including Open Firmware based
 	  PowerPC systems and embedded systems on architectures using the
 	  flattened device tree format.
+
+config SERIAL_ACPI_PLATFORM
+	tristate "ACPI platform bus based probing for 8250 ports"
+	depends on SERIAL_8250 && ACPI
+	default n
+	help
+	  This option is used for generic 8250 compatible serial ports
+	  that are enumerated through ACPI platform bus.
