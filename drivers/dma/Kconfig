@@ -448,6 +448,26 @@ config MMP_PDMA
 	help
 	  Support the MMP PDMA engine for PXA and MMP platform.
 
+config MMP_PDMA_SPACEMIT_K1X
+	bool "Spacemit mmp_pdma support"
+	depends on ARCH_MMP || ARCH_PXA || COMPILE_TEST || SOC_SPACEMIT_K1X
+	select DMA_ENGINE
+	help
+	  Support the MMP PDMA engine for Spacemit-k1x platform.
+
+config SPACEMIT_PDMA_SUPPORT_64BIT
+	bool "MMP PDMA support the 64-bit address"
+	default y
+	help
+	  Support 64-bit address in the MMP PDMA
+
+config ADMA_SPACEMIT_K1X
+	bool "Spacemit adma support"
+	depends on SOC_SPACEMIT_K1X && RPMSG_VIRTIO
+	select DMA_ENGINE
+	help
+	  Support the AMDA engine for Spacemit-k1x sspa.
+
 config MMP_TDMA
 	tristate "MMP Two-Channel DMA support"
 	depends on ARCH_MMP || COMPILE_TEST

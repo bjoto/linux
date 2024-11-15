@@ -385,6 +385,15 @@ config GPIO_IMX_SCU
        def_bool y
        depends on IMX_SCU
 
+config GPIO_K1X
+	bool "SPACEMIT-K1X GPIO support"
+	depends on SOC_SPACEMIT_K1X
+	help
+	  Say yes here to support the K1X GPIO device.
+	  The K1X GPIO device may have several banks, and each
+	  bank control at most 32 GPIO pins. The number of banks
+	  is passed by device tree or platform data.
+
 config GPIO_IXP4XX
 	bool "Intel IXP4xx GPIO"
 	depends on ARCH_IXP4XX

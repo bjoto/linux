@@ -426,6 +426,12 @@ config SERIAL_PXA_NON8250
 	bool
 	depends on !SERIAL_8250 || COMPILE_TEST
 
+config SERIAL_PXA_SPACEMIT_K1X
+	bool "Spacemit PXA driver suppor"
+	depends on !SERIAL_8250 || COMPILE_TEST
+	help
+	  Spacemit PXA serial driver
+
 config SERIAL_PXA_CONSOLE
 	bool "Console on PXA serial port (DEPRECATED)"
 	depends on SERIAL_PXA

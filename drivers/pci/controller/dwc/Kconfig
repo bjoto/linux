@@ -14,6 +14,32 @@ config PCIE_DW_EP
 	bool
 	select PCIE_DW
 
+config PCI_K1X
+	bool
+
+config PCI_K1X_HOST
+	bool "Spacemit K1X PCIe Controller - Host Mode"
+	depends on SOC_SPACEMIT_K1X
+	depends on PCI && PCI_MSI_IRQ_DOMAIN
+	depends on OF && HAS_IOMEM
+	select PCIE_DW_HOST
+	select PCI_K1X
+	default y
+	help
+	  Enables support for the PCIe controller in the K1X SoC to work in
+          host mode.
+
+config PCI_K1X_EP
+	bool "Spacemit K1X PCIE Controller - Endpoint Mode"
+	depends on SOC_SPACEMIT_K1X
+	depends on PCI_ENDPOINT
+	depends on OF && HAS_IOMEM
+	select PCIE_DW_EP
+	select PCI_K1X
+	help
+	  Enables support for the PCIe controller in the K1X SoC to work in
+          endpoint mode.
+
 config PCIE_AL
 	bool "Amazon Annapurna Labs PCIe controller"
 	depends on OF && (ARM64 || COMPILE_TEST)
@@ -458,5 +484,14 @@ config PCIE_VISCONTI_HOST
 	help
 	  Say Y here if you want PCIe controller support on Toshiba Visconti SoC.
 	  This driver supports TMPV7708 SoC.
+
+config PCIE_SPACEMIT
+	bool "Spacemit PCIe controller"
+	depends on SOC_SPACEMIT || COMPILE_TEST
+	depends on PCI_MSI_IRQ_DOMAIN
+	select PCIE_DW_HOST
+	help
+	  Say Y here to enable PCIe controller support on Spacemit SoCs. The
+	  PCIe controller uses the DesignWare core plus Spacemit hardware wrappers.
 
 endmenu
