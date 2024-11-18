@@ -10,6 +10,7 @@
 #include <linux/thermal.h>
 #include <linux/reset.h>
 #include "thermal_hwmon.h"
+#include "thermal_core.h"
 #include "k1x-thermal.h"
 
 #define MAX_SENSOR_NUMBER		5
@@ -305,7 +306,7 @@ static int k1x_thermal_probe(struct platform_device *pdev)
 		}
 
 		/* register the thermal sensor to hwmon */
-		if (devm_thermal_add_hwmon_sysfs(s->sdesc[i].tzd))
+		if (devm_thermal_add_hwmon_sysfs(dev, s->sdesc[i].tzd))
 			dev_warn(dev, "Failed to add hwmon sysfs attributes\n");
 
 		/* enable sensor low & higth threshold interrupt */
@@ -318,7 +319,7 @@ static int k1x_thermal_probe(struct platform_device *pdev)
 	return 0;
 }
 
-static int k1x_thermal_remove(struct platform_device *pdev)
+static void k1x_thermal_remove(struct platform_device *pdev)
 {
 	int i;
 	struct k1x_thermal_sensor *s = platform_get_drvdata(pdev);
@@ -331,8 +332,6 @@ static int k1x_thermal_remove(struct platform_device *pdev)
 		devm_thermal_of_zone_unregister(&pdev->dev, s->sdesc[i].tzd);
 		devm_free_irq(&pdev->dev, s->irq, s->sdesc + i);
 	}
-
-	return 0;
 }
 
 static const struct of_device_id of_k1x_thermal_match[] = {

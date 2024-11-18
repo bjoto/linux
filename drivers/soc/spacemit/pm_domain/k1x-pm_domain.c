@@ -22,6 +22,7 @@
 #include <linux/regulator/consumer.h>
 #include <dt-bindings/pmu/k1x_pmu.h>
 #include <linux/syscore_ops.h>
+#include <linux/platform_device.h>
 #include "atomic_qos.h"
 
 #define MAX_REGMAP		5

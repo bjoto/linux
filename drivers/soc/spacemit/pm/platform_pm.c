@@ -13,9 +13,9 @@
 #include <asm/suspend.h>
 #include <linux/spacemit/platform_pm_ops.h>
 
-static void suspend_save_csrs(struct suspend_context *context)
+static void _suspend_save_csrs(struct suspend_context *context)
 {
-	context->scratch = csr_read(CSR_SCRATCH);
+	//context->scratch = csr_read(CSR_SCRATCH);
 	context->tvec = csr_read(CSR_TVEC);
 	context->ie = csr_read(CSR_IE);
 
@@ -34,9 +34,9 @@ static void suspend_save_csrs(struct suspend_context *context)
 #endif
 }
 
-static void suspend_restore_csrs(struct suspend_context *context)
+static void _suspend_restore_csrs(struct suspend_context *context)
 {
-	csr_write(CSR_SCRATCH, context->scratch);
+	//csr_write(CSR_SCRATCH, context->scratch);
 	csr_write(CSR_TVEC, context->tvec);
 	csr_write(CSR_IE, context->ie);
 
@@ -58,7 +58,7 @@ static int spacemit_cpu_suspend(unsigned long arg,
 		return -EINVAL;
 
 	/* Save additional CSRs*/
-	suspend_save_csrs(&context);
+	_suspend_save_csrs(&context);
 
 	/*
 	 * Function graph tracer state gets incosistent when the kernel
@@ -86,7 +86,7 @@ static int spacemit_cpu_suspend(unsigned long arg,
 	unpause_graph_tracing();
 
 	/* Restore additional CSRs */
-	suspend_restore_csrs(&context);
+	_suspend_restore_csrs(&context);
 
 	return rc;
 }

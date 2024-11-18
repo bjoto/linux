@@ -12,6 +12,7 @@
 #include <linux/interrupt.h>
 #include <linux/io.h>
 #include <linux/gpio.h>
+#include <linux/gpio/driver.h>
 #include <linux/clk.h>
 #include <linux/of_device.h>
 #include <linux/platform_device.h>
@@ -379,7 +380,6 @@ static int k1x_gpio_probe(struct platform_device *pdev)
 	k1x_chip->chip.set = k1x_gpio_set;
 	k1x_chip->chip.to_irq = k1x_gpio_to_irq;
 #ifdef CONFIG_OF_GPIO
-	k1x_chip->chip.of_node = np;
 	k1x_chip->chip.of_xlate = k1x_gpio_of_xlate;
 	k1x_chip->chip.of_gpio_n_cells = 2;
 #endif
@@ -392,7 +392,7 @@ static int k1x_gpio_probe(struct platform_device *pdev)
 		goto err;
 	}
 
-	gpiochip_add(&k1x_chip->chip);
+	devm_gpiochip_add_data(dev, &k1x_chip->chip, NULL);
 
 	/* clear all GPIO edge detects */
 	for (i = 0; i < k1x_chip->nbank; i++) {
