@@ -22,6 +22,9 @@ extern void *return_address(unsigned int level);
 void _mcount(void);
 static inline unsigned long ftrace_call_adjust(unsigned long addr)
 {
+	if (IS_ENABLED(CONFIG_DYNAMIC_FTRACE_WITH_CALL_OPS))
+		return addr + 8;
+
 	return addr;
 }
 
