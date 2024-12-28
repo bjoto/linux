@@ -144,7 +144,7 @@ int ftrace_make_call(struct dyn_ftrace *rec, unsigned long addr)
 	orig_addr = (unsigned long)&ftrace_caller;
 	distance = addr > orig_addr ? addr - orig_addr : orig_addr - addr;
 	if (distance > JALR_RANGE)
-		return -EINVAL;
+		addr = FTRACE_ADDR;
 
 	return __ftrace_modify_call(rec->ip, addr, false);
 }
@@ -210,16 +210,11 @@ int ftrace_modify_call(struct dyn_ftrace *rec, unsigned long old_addr,
 	unsigned long caller = rec->ip;
 	int ret;
 
-	make_call_t0(caller, old_addr, call);
-	ret = ftrace_check_current_call(caller, call);
-	if (ret)
-		return ret;
-
 	ret = ftrace_rec_update_ops(rec);
 	if (ret)
 		return ret;
 
-	return __ftrace_modify_call(caller, addr, true);
+	return __ftrace_modify_call(caller, FTRACE_ADDR, true);
 }
 #endif
 
