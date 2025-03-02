@@ -7,7 +7,8 @@
 #include <linux/kernel.h>
 #include <linux/random.h>
 #include <linux/string.h>
-
+#include <linux/timekeeping.h>
+	
 /*
  * blake2s_testvecs[] generated with the program below (using libb2-dev and
  * libssl-dev [OpenSSL])
@@ -643,9 +644,16 @@ static bool __init noinline_for_stack blake2s_random_test(void)
 bool __init blake2s_selftest(void)
 {
 	bool success;
+	u64 t;
 
+	t = ktime_get_ns();
 	success = blake2s_digest_test();
+	t = ktime_get_ns() - t;
+	pr_err("BT blake2s_digest_test took t=%llu\n", t);
+	t = ktime_get_ns();
 	success &= blake2s_random_test();
+	t = ktime_get_ns() - t;
+	pr_err("BT blake2s_random_test took t=%llu\n", t);
 
 	return success;
 }
