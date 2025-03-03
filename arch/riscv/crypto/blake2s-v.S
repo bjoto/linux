@@ -59,9 +59,10 @@ GATHER_DIAG3:
  *
  */
 SYM_FUNC_START(blake2s_compress_vector)
-	vsetivli	t0, 1, e32, m1, ta, ma
-	vmv.v.x		v5, a3
 	vsetivli	t0, 4, e32, m1, ta, ma
+	vmv.v.i		v0, 1
+	vmv.v.i		v1, 0
+	vmerge.vxm	v5, v1, a3, v0
 	vle32.v		v0, (a0)
 	addi		t0, a0, 0x10
 	vle32.v		v1, (t0)

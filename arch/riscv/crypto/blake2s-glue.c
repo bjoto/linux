@@ -20,7 +20,8 @@ asmlinkage void blake2s_compress_vector(struct blake2s_state *state, const u8 *b
 
 void blake2s_compress(struct blake2s_state *state, const u8 *block, size_t nblocks, const u32 inc)
 {
-	if (!(has_vector() && riscv_v_vsize >= 256 * 32 / 8) || !may_use_simd()) {
+	if (!(has_vector() && riscv_v_vsize >= 256 * 32 / 8) || !may_use_simd()
+	    || !IS_ALIGNED((unsigned long)block, sizeof(u32))) {
 		blake2s_compress_generic(state, block, nblocks, inc);
 		return;
 	}
