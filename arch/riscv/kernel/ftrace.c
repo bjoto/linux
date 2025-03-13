@@ -12,6 +12,19 @@
 #include <asm/cacheflush.h>
 #include <asm/text-patching.h>
 
+unsigned long ftrace_call_adjust(unsigned long addr)
+{
+	if (IS_ENABLED(CONFIG_DYNAMIC_FTRACE_WITH_CALL_OPS))
+		return addr + 8 + MCOUNT_AUIPC_SIZE;
+
+	return addr + MCOUNT_AUIPC_SIZE;
+}
+
+unsigned long arch_ftrace_get_symaddr(unsigned long fentry_ip)
+{
+	return fentry_ip - MCOUNT_AUIPC_SIZE;
+}
+
 #ifdef CONFIG_DYNAMIC_FTRACE
 void arch_ftrace_update_code(int command)
 {
@@ -20,38 +33,6 @@ void arch_ftrace_update_code(int command)
 	ftrace_modify_all_code(command);
 	mutex_unlock(&text_mutex);
 	flush_icache_all();
-}
-
-static int ftrace_check_current_call(unsigned long hook_pos,
-				     unsigned int *expected)
-{
-	unsigned int replaced[2];
-	unsigned int nops[2] = {NOP4, NOP4};
-
-	/* we expect nops at the hook position */
-	if (!expected)
-		expected = nops;
-
-	/*
-	 * Read the text we want to modify;
-	 * return must be -EFAULT on read error
-	 */
-	if (copy_from_kernel_nofault(replaced, (void *)hook_pos,
-			MCOUNT_INSN_SIZE))
-		return -EFAULT;
-
-	/*
-	 * Make sure it is what we expect it to be;
-	 * return must be -EINVAL on failed comparison
-	 */
-	if (memcmp(expected, replaced, sizeof(replaced))) {
-		pr_err("%p: expected (%08x %08x) but got (%08x %08x)\n",
-		       (void *)hook_pos, expected[0], expected[1], replaced[0],
-		       replaced[1]);
-		return -EINVAL;
-	}
-
-	return 0;
 }
 
 static int __ftrace_modify_call(unsigned long hook_pos, unsigned long target, bool validate)
@@ -66,8 +47,7 @@ static int __ftrace_modify_call(unsigned long hook_pos, unsigned long target, bo
 		 * Read the text we want to modify;
 		 * return must be -EFAULT on read error
 		 */
-		if (copy_from_kernel_nofault(replaced, (void *)hook_pos,
-					     MCOUNT_INSN_SIZE))
+		if (copy_from_kernel_nofault(replaced, (void *)hook_pos, 2 * MCOUNT_INSN_SIZE))
 			return -EFAULT;
 
 		if (replaced[0] != call[0]) {
@@ -100,10 +80,9 @@ static const struct ftrace_ops *riscv64_rec_get_ops(struct dyn_ftrace *rec)
 	return ops;
 }
 
-static int ftrace_rec_set_ops(const struct dyn_ftrace *rec,
-			      const struct ftrace_ops *ops)
+static int ftrace_rec_set_ops(const struct dyn_ftrace *rec, const struct ftrace_ops *ops)
 {
-	unsigned long literal = rec->ip - 8;
+	unsigned long literal = ALIGN_DOWN(rec->ip - 12, 8);
 
 	return patch_text_nosync((void *)literal, &ops, sizeof(ops));
 }
@@ -134,7 +113,7 @@ static int __ftrace_modify_call_site(ftrace_func_t *hook_pos, ftrace_func_t targ
 
 int ftrace_make_call(struct dyn_ftrace *rec, unsigned long addr)
 {
-	unsigned long distance, orig_addr;
+	unsigned long distance, orig_addr, pc = rec->ip - MCOUNT_AUIPC_SIZE;
 	int ret;
 
 	ret = ftrace_rec_update_ops(rec);
@@ -146,11 +125,10 @@ int ftrace_make_call(struct dyn_ftrace *rec, unsigned long addr)
 	if (distance > JALR_RANGE)
 		addr = FTRACE_ADDR;
 
-	return __ftrace_modify_call(rec->ip, addr, false);
+	return __ftrace_modify_call(pc, addr, false);
 }
 
-int ftrace_make_nop(struct module *mod, struct dyn_ftrace *rec,
-		    unsigned long addr)
+int ftrace_make_nop(struct module *mod, struct dyn_ftrace *rec, unsigned long addr)
 {
 	unsigned int nops[1] = {NOP4};
 	int ret;
@@ -159,7 +137,7 @@ int ftrace_make_nop(struct module *mod, struct dyn_ftrace *rec,
 	if (ret)
 		return ret;
 
-	if (patch_insn_write((void *)(rec->ip + MCOUNT_AUIPC_SIZE), nops, MCOUNT_NOP4_SIZE))
+	if (patch_insn_write((void *)rec->ip, nops, MCOUNT_NOP4_SIZE))
 		return -EPERM;
 
 	return 0;
@@ -174,17 +152,22 @@ int ftrace_make_nop(struct module *mod, struct dyn_ftrace *rec,
  */
 int ftrace_init_nop(struct module *mod, struct dyn_ftrace *rec)
 {
+	unsigned long pc = rec->ip - MCOUNT_AUIPC_SIZE;
 	unsigned int nops[2];
-	int out;
+	int ret;
 
-	make_call_t0(rec->ip, &ftrace_caller, nops);
+	ret = ftrace_rec_set_nop_ops(rec);
+	if (ret)
+		return ret;
+
+	make_call_t0(pc, &ftrace_caller, nops);
 	nops[1] = NOP4;
 
 	mutex_lock(&text_mutex);
-	out = patch_insn_write((void *)rec->ip, nops, MCOUNT_INSN_SIZE);
+	ret = patch_insn_write((void *)pc, nops, 2 * MCOUNT_INSN_SIZE);
 	mutex_unlock(&text_mutex);
 
-	return out;
+	return ret;
 }
 
 ftrace_func_t ftrace_call_dest = ftrace_stub;
@@ -206,8 +189,7 @@ int ftrace_update_ftrace_func(ftrace_func_t func)
 int ftrace_modify_call(struct dyn_ftrace *rec, unsigned long old_addr,
 		       unsigned long addr)
 {
-	unsigned int call[2];
-	unsigned long caller = rec->ip;
+	unsigned long caller = rec->ip - MCOUNT_AUIPC_SIZE;
 	int ret;
 
 	ret = ftrace_rec_update_ops(rec);

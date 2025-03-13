@@ -20,13 +20,9 @@ extern void *return_address(unsigned int level);
 #define ftrace_return_address(n) return_address(n)
 
 void _mcount(void);
-static inline unsigned long ftrace_call_adjust(unsigned long addr)
-{
-	if (IS_ENABLED(CONFIG_DYNAMIC_FTRACE_WITH_CALL_OPS))
-		return addr + 8;
-
-	return addr;
-}
+unsigned long ftrace_call_adjust(unsigned long addr);
+unsigned long arch_ftrace_get_symaddr(unsigned long fentry_ip);
+#define ftrace_get_symaddr(fentry_ip) arch_ftrace_get_symaddr(fentry_ip)
 
 /*
  * Let's do like x86/arm64 and ignore the compat syscalls.
@@ -118,9 +114,10 @@ do {									\
 } while (0)
 
 /*
- * Let auipc+jalr be the basic *mcount unit*, so we make it 8 bytes here.
+ * Only the jalr insn in the auipc+jalr is patched, so we make it 4
+ * bytes here.
  */
-#define MCOUNT_INSN_SIZE 8
+#define MCOUNT_INSN_SIZE	4
 #define MCOUNT_AUIPC_SIZE	4
 #define MCOUNT_JALR_SIZE	4
 #define MCOUNT_NOP4_SIZE	4

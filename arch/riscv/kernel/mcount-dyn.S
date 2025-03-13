@@ -64,8 +64,7 @@
 * After the stack is established,
 *
 * 0(sp) stores the PC of the traced function which can be accessed
-* by &(fregs)->epc in tracing function. Note that the real
-* function entry address should be computed with -FENTRY_RA_OFFSET.
+* by &(fregs)->epc in tracing function.
 *
 * 8(sp) stores the function return address (i.e. parent IP) that
 * can be accessed by &(fregs)->ra in tracing function.
@@ -142,7 +141,7 @@
 	.endm
 
 	.macro PREPARE_ARGS
-	addi	a0, t0, -FENTRY_RA_OFFSET	// ip (callsite's auipc insn)
+	addi	a0, t0, -MCOUNT_JALR_SIZE	// ip (callsite's jalr insn)
 #ifdef CONFIG_DYNAMIC_FTRACE_WITH_CALL_OPS
 	mv 	a1, ra				// parent_ip
 	REG_L   a2, -16(t0)			// op
